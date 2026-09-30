@@ -18,6 +18,8 @@ export interface WrittenPost {
 export interface WriteOptions {
   userTopic?: string;
   userComment?: string;
+  // few-shot образцы стиля берутся только этого блога (style_samples.blog_id).
+  blogId?: number | null;
 }
 
 export class PostWriter {
@@ -27,11 +29,12 @@ export class PostWriter {
   ) {}
 
   async write(db: BlogDb, news: NewsRow, opts: WriteOptions = {}): Promise<WrittenPost> {
-    const samples = db.styleSamples(3);
+    const samples = db.styleSamples(3, opts.blogId);
 
     // --- Извлекаем ВСЕ поля профиля ---
     const p = this.profile?.active;
-    const club = p?.любимый_клуб ?? 'Челси';
+    const channel = p?.канал ?? 'Иди на факты глянь';
+    const topic = p?.тематика ?? `футбол: ФК «${p?.любимый_клуб ?? 'Челси'}»`;
     const style = p?.стиль ?? 'ироничный, резкий, с подколами';
     const emojiRule = p?.эмодзи ?? 'без эмодзи';
     const signature = p?.подпись ?? '@lookatfacts';
@@ -42,13 +45,13 @@ export class PostWriter {
     const language = p?.язык ?? 'русский';
 
     // --- System-промпт: роль + жёсткие правила стиля ---
-    const system = `Ты — автор Telegram-канала «Иди на факты глянь» про ФК «${club}».
+    const system = `Ты — автор Telegram-канала «${channel}» (${topic}).
 Ты пишешь ${style}. Язык: ${language}.
 
 ЖЁСТКИЕ ПРАВИЛА СТИЛЯ:
 - ОБЪЁМ: ${lengthRule}. Если тема мелкая — хватит и 100-150 символов. НЕ РАСТЯГИВАЙ.
 - ФОРМАТ: ${formatRule}.
-- Шапка поста: «Иди на факты глянь: » (без даты/времени). Первый символ ответа — «И».
+- Шапка поста: «${channel}: » (без даты/времени). Первый символ ответа — «${channel[0]}».
 - ЭМОДЗИ: ${emojiRule}.
 - Подпись в конце: ${signature}
 ${humor ? `- ПРИЁМЫ ЮМОРА которые используй: ${humor}.` : ''}
@@ -103,20 +106,20 @@ ${topicBlock}${commentBlock}
       maxTokens: 2000,
     });
 
-    const cleaned = cleanPost(content);
+    const cleaned = cleanPost(content, channel);
     return { content: cleaned, news };
   }
 }
 
-function cleanPost(raw: string): string {
+function cleanPost(raw: string, channel = 'Иди на факты глянь'): string {
   let s = raw.trim();
   // Убираем markdown-обёртку.
   s = s.replace(/^```[\s\S]*?\n/, '').replace(/\n```$/, '');
   // Убираем "Вот пост:" и подобные преамбулы.
   s = s.replace(/^(вот\s+пост|готово|пост:|пост готов)\s*:?\s*/i, '');
   // Если нет шапки — добавляем.
-  if (!s.startsWith('Иди на факты глянь')) {
-    s = 'Иди на факты глянь: ' + s;
+  if (!s.startsWith(channel)) {
+    s = `${channel}: ` + s;
   }
   return s.trim();
 }
@@ -135,7 +138,8 @@ export async function rewritePost(
   profile?: import('../profile.js').ProfileManager,
 ): Promise<string> {
   const p = profile?.active;
-  const system = `Ты — автор Telegram-канала «Иди на факты глянь».
+  const channel = p?.канал ?? 'Иди на факты глянь';
+  const system = `Ты — автор Telegram-канала «${channel}».
 ${p ? `Стиль: ${p.стиль}. Эмодзи: ${p.эмодзи}. Подпись: ${p.подпись}.` : ''}
 Перепиши пост с учётом правок. Сохрани стиль, шапку, подпись.
 Объём: ${p?.длина_постов ?? '100-500 символов'}.
@@ -157,6 +161,6 @@ ${edit}
     [msg.system(system), msg.user(user)],
     { temperature: 0.7, maxTokens: 2000 },
   );
-  return cleanPost(content);
+  return cleanPost(content, channel);
 }
 

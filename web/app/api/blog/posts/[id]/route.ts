@@ -23,11 +23,24 @@ export async function GET(
   const { id: idStr } = await params;
   const id = parseId(idStr);
   if (id === null) return NextResponse.json({ error: 'bad id' }, { status: 400 });
-  const post = await withDb(() => getBlogDb().getPost(id));
-  if (!post) return NextResponse.json({ error: 'not found' }, { status: 404 });
+  const data = await withDb(() => {
+    const db = getBlogDb();
+    const post = db.getPost(id);
+    if (!post) return null;
+    const blog =
+      post.blog_id !== null
+        ? (() => {
+            const b = db.getBlog(post.blog_id);
+            return b ? { id: b.id, slug: b.slug, name: b.name, tgChatId: b.tg_chat_id } : null;
+          })()
+        : null;
+    return { post, blog };
+  });
+  if (!data) return NextResponse.json({ error: 'not found' }, { status: 404 });
   const tg = await withDb(() => getOutboxDb().latestForPost(id));
   return NextResponse.json({
-    post,
+    post: data.post,
+    blog: data.blog,
     tg: tg
       ? {
           status: tg.status,

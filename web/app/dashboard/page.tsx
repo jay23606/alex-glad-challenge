@@ -44,6 +44,7 @@ export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: 'Dashboard' };
 
 interface DashboardStats {
+  blogs: number;
   news: number;
   posts: number;
   styleSamples: number;
@@ -66,6 +67,7 @@ async function readStats(): Promise<DashboardStats> {
     const tgStats = tg.stats();
     const chats = dialog.listChats(2000);
     return {
+      blogs: blog.listBlogs().length,
       news: blog.newsCount(),
       posts: blog.postsCount(),
       styleSamples: blog.styleSamplesCount(),
@@ -134,7 +136,7 @@ const CAPABILITY_GROUPS: Array<{
         href: '/blog/news',
         icon: IconEdit,
         title: 'Пост из новостей',
-        desc: 'Собирает свежие новости за выбранный период в готовый черновик поста.',
+        desc: 'Свежие новости выбранного блога превращает в готовый черновик поста голосом этого блога.',
       },
       {
         href: '/blog/digest',
@@ -391,6 +393,7 @@ export default async function DashboardPage() {
       <section>
         <SectionLabel>Базы данных</SectionLabel>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <Tile label="блоги" value={stats.blogs} />
           <Tile label="новости" value={stats.news} />
           <Tile label="посты" value={stats.posts} />
           <Tile label="стиль" value={stats.styleSamples} />

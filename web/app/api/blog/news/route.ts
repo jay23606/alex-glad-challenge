@@ -15,7 +15,13 @@ import { newsOptsSchema } from '../../../../lib/shared/forms';
 import type { SseBlogNewsEvent } from '../../../../lib/shared/sse';
 import { pickLlmClient } from '../../../../lib/server/llm';
 import { getBlogDb, withDb } from '../../../../lib/server/db';
-import { runNewsPipeline, ProfileManager, dataPath } from '../../../../lib/server/challenge';
+import { resolveBlog, loadBlogProfile, blogProfileMissing, blogSources } from '../../../../lib/server/blogs';
+import {
+  runNewsPipeline,
+  ProfileManager,
+  dataPath,
+  type BlogRow,
+} from '../../../../lib/server/challenge';
 import { safeMessage } from '../../../../lib/server/safe-message';
 
 export const runtime = 'nodejs';
@@ -29,8 +35,36 @@ export async function POST(req: NextRequest): Promise<Response> {
       { status: 400, headers: { 'Content-Type': 'application/json' } },
     );
   }
-  const { hours, top, forIndex, llm = 'cloud' } = parsed.data;
+  const { hours, top, forIndex, llm = 'cloud', blog: blogRef } = parsed.data;
   const client = pickLlmClient(llm);
+
+  // Мульти-блог: blog задан → источники/профиль/штамп этого блога; не задан →
+  // легаси-режим (дефолтные фиды, профиль default|первый) для старых вызовов.
+  let blog: BlogRow | null = null;
+  if (blogRef) {
+    const res = resolveBlog(blogRef);
+    if (!res.blog) {
+      return new Response(JSON.stringify({ error: res.error ?? 'blog not found' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    blog = res.blog;
+  }
+  const blogProfile = blog ? loadBlogProfile(blog) : null;
+  if (blog && !blogProfile) {
+    return new Response(JSON.stringify({ error: blogProfileMissing(blog) }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  // Блог без своих источников не должен молча получить дефолтные футбольные фиды.
+  if (blog && blogSources(blog).length === 0) {
+    return new Response(
+      JSON.stringify({ error: `У блога «${blog.name}» не настроены RSS-источники — задайте их через PATCH /api/blogs/${blog.slug}` }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
 
   const encoder = new TextEncoder();
   const body = new ReadableStream<Uint8Array>({
@@ -41,14 +75,20 @@ export async function POST(req: NextRequest): Promise<Response> {
       try {
         send({ type: 'stage', step: 'start' });
 
-        // Профиль — зеркало cli runNewsCommand: default | первый | создать default.
-        const profile = new ProfileManager(dataPath('profiles'));
-        const names = profile.list();
-        if (names.length > 0) {
-          profile.load(names.includes('default') ? 'default' : names[0]);
-        } else {
-          profile.create('default');
-        }
+        // Профиль: блог → его профиль голоса; легаси — зеркало cli runNewsCommand
+        // (default | первый | создать default).
+        const profile =
+          blogProfile ??
+          (() => {
+            const mgr = new ProfileManager(dataPath('profiles'));
+            const names = mgr.list();
+            if (names.length > 0) {
+              mgr.load(names.includes('default') ? 'default' : names[0]);
+            } else {
+              mgr.create('default');
+            }
+            return mgr;
+          })();
 
         // withDb удерживает mutex на весь pipeline (sync DatabaseSync-вызовы + LLM).
         // Для 1-юзер локально приемлемо (R4, план §6) — то же, что в /api/rag/query.
@@ -59,11 +99,12 @@ export async function POST(req: NextRequest): Promise<Response> {
             topK: top,
             writeForIndex: forIndex,
             profile,
+            ...(blog ? { blog } : {}),
             signal: req.signal,
           });
           let pid: number | null = null;
           if (r.post) {
-            const last = getBlogDb().recentPosts(1)[0];
+            const last = getBlogDb().recentPosts(1, blog?.id)[0];
             if (last) pid = last.id;
           }
           return { result: r, postId: pid };
