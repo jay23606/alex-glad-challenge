@@ -15,22 +15,32 @@ Telegram-канала «Иди на факты глянь»: RSS → выбор 
 
 ## Архитектура
 
-Единый монолит `challenge/` (TypeScript, один пакет, один CLI). Все 10 дней
-реализованы как демо-модули в `challenge/src/demos/` и запускаются одной
-командой. Каждый новый день дорабатывает этот монолит в отдельной git-ветке
-и вливается в `main` через PR.
+Монорепозиторий из двух пакетов (pnpm workspace):
 
-- **Дни 1–10 (архив `1-day/` … `10-day/`):** фрагменты Next.js/React-приложения.
-  Оставлены как историческая ссылка, в разработке не участвуют.
-- **Дни 1–10 (`challenge/src/demos/day-01..10.ts`):** актуальные демо-модули
-  единого монолита.
-- **День 11+:** дорабатывается в ветке `day-NN`, добавляется в
-  `challenge/src/demos/day-NN.ts`, регистрируется в `registry.ts`, льётся в main.
+- **`challenge/`** — основной TypeScript-монолит: CLI, REPL, `LlmClient`,
+  агенты, RAG, Telegram-бот, блог-pipeline, SQLite через `node:sqlite`,
+  MCP-серверы и исторические демо `day-01..30`.
+- **`web/`** — локальный Next.js 15 (App Router) + React 19: админка, дашборд,
+  чат, RAG, блог и Telegram-инструменты. Доменная логика остаётся в
+  `challenge/`; `web/` — scoped override с собственным production-build.
 
-Стек: Node.js 24+, TypeScript (strict), pnpm. API: DeepSeek и OpenRouter
-(модельный зоопарк). Ключи — через `.env`, см. `.env.example`.
+Исторические демо `challenge/src/demos/day-01..30` **заморожены**. Новые задачи
+(ADVANCED-челлендж и продуктовые фичи) делаются как фичи: core-сервис,
+CLI-команда, web-endpoint/страница, тесты. Ветка на задачу (`day-NN` или
+`feat/<slug>`) вливается в `main` через PR.
+
+Стек: Node.js 24+, TypeScript (strict, ESM), pnpm, `tsx` без сборки для
+`challenge/`; Next.js 15 + React 19 + Tailwind для `web/`; SQLite
+(`node:sqlite`), zod, `node:test` / Vitest / Playwright. API: DeepSeek и
+OpenRouter. Ключи — через `.env`, см. `.env.example`.
+
+Правила для ИИ-ассистентов — в [`AGENTS.md`](AGENTS.md) и `.omp/` (sticky
+правила, субагенты, скиллы). Полный лог — в [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Что уже разобрано
+
+> Таблица ниже — исторические дни 1–10. Актуальные правила и текущая
+> архитектура — в `AGENTS.md`.
 
 | День | Тема | Где смотреть |
 |------|------|--------------|

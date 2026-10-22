@@ -31,4 +31,11 @@ export { TodoDb } from './todoDb.js';
 export type { TodoRow } from './todoDb.js';
 export { parseTodoArgs } from './todoParser.js';
 export type { ParsedTodoArgs } from './todoParser.js';
+export { TokenEstimator, DEFAULT_BYTES_PER_TOKEN } from './tokenEstimator.js';
+export type {
+  TokenEstimatorOptions,
+  TextEstimate,
+  MessageEstimate,
+  TokenEstimate,
+} from './tokenEstimator.js';
 export * as agents from './agents/index.js';

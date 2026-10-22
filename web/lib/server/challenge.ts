@@ -112,3 +112,11 @@ export {
 } from '@challenge/core/agents/telegramScan';
 export type { RawTelegramClient } from '@challenge/core/agents/telegramScan';
 export { saveChatTitle } from '@challenge/core/rag/chatCatalog';
+// Оценка токенов: чистая эвристика UTF-8 bytes / 4 (POST /api/tokens/estimate).
+export { TokenEstimator, DEFAULT_BYTES_PER_TOKEN } from '@challenge/core/tokenEstimator';
+export type {
+  TokenEstimatorOptions,
+  TextEstimate,
+  MessageEstimate,
+  TokenEstimate,
+} from '@challenge/core/tokenEstimator';

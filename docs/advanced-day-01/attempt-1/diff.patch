@@ -1,0 +1,420 @@
+diff --git a/challenge/src/core/index.ts b/challenge/src/core/index.ts
+index 5478133..14afbd5 100644
+--- a/challenge/src/core/index.ts
++++ b/challenge/src/core/index.ts
+@@ -15,6 +15,8 @@ export { ProfileManager } from './profile.js';
+ export type { UserProfile } from './profile.js';
+ export { Constraints } from './constraints.js';
+ export type { Constraint, ConstraintType } from './constraints.js';
++export { TokenEstimator } from './tokenEstimator.js';
++export type { MessageEstimate, TokenEstimate } from './tokenEstimator.js';
+ 
+ export { BlogDb } from './db.js';
+ export type { NewsRow, PostRow, StyleSampleRow } from './db.js';
+diff --git a/challenge/src/core/tokenEstimator.test.ts b/challenge/src/core/tokenEstimator.test.ts
+new file mode 100644
+index 0000000..a12b0ba
+--- /dev/null
++++ b/challenge/src/core/tokenEstimator.test.ts
+@@ -0,0 +1,89 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { TokenEstimator } from './tokenEstimator.js';
++import { msg } from './types.js';
++import type { ChatMessage } from './types.js';
++
++test('estimateText: ASCII — ceil(байты/4)', () => {
++  assert.deepEqual(TokenEstimator.estimateText(''), { bytes: 0, tokens: 0 });
++  assert.deepEqual(TokenEstimator.estimateText('h'), { bytes: 1, tokens: 1 });
++  assert.deepEqual(TokenEstimator.estimateText('hell'), { bytes: 4, tokens: 1 });
++  assert.deepEqual(TokenEstimator.estimateText('hello'), { bytes: 5, tokens: 2 });
++});
++
++test('estimateText: кириллица (2 байта/символ) и эмодзи (4 байта)', () => {
++  // 'привет' = 6 × 2 = 12 байт → 3 токена.
++  assert.deepEqual(TokenEstimator.estimateText('привет'), { bytes: 12, tokens: 3 });
++  // '👍' = 4 байта → 1 токен; '👍👍' = 8 → 2.
++  assert.deepEqual(TokenEstimator.estimateText('👍'), { bytes: 4, tokens: 1 });
++  assert.deepEqual(TokenEstimator.estimateText('👍👍'), { bytes: 8, tokens: 2 });
++  // Смешанный: 1 + 4 + 2 = 7 байт → 2 токена.
++  assert.deepEqual(TokenEstimator.estimateText('a👍б'), { bytes: 7, tokens: 2 });
++});
++
++test('estimate: разбивка по сообщениям и суммарный total', () => {
++  const messages: ChatMessage[] = [
++    msg.system('ты ревьюер'), // 19 байт (кириллица) → 5
++    msg.user('hello world'), // 11 байт → 3
++    msg.assistant('ok'), // 2 байта → 1
++  ];
++  const r = TokenEstimator.estimate(messages);
++  assert.equal(r.messages.length, 3);
++  assert.deepEqual(
++    r.messages.map((m) => [m.index, m.role, m.bytes, m.tokens]),
++    [
++      [0, 'system', 19, 5],
++      [1, 'user', 11, 3],
++      [2, 'assistant', 2, 1],
++    ],
++  );
++  assert.equal(r.total, 9);
++});
++
++test('estimate: бюджет задан — remaining = budget − total, fits по границе', () => {
++  const messages: ChatMessage[] = [msg.user('hello'), msg.assistant('ok')]; // 2 + 1 = 3
++  const withBudget = TokenEstimator.estimate(messages, 10);
++  assert.deepEqual(withBudget, {
++    total: 3,
++    budget: 10,
++    remaining: 7,
++    fits: true,
++    messages: [
++      { index: 0, role: 'user', bytes: 5, tokens: 2 },
++      { index: 1, role: 'assistant', bytes: 2, tokens: 1 },
++    ],
++  });
++  // total == budget → fits true, remaining 0.
++  const eq = TokenEstimator.estimate(messages, 3);
++  assert.equal(eq.fits, true);
++  assert.equal(eq.remaining, 0);
++  // total > budget → fits false, remaining отрицательный.
++  const over = TokenEstimator.estimate(messages, 2);
++  assert.equal(over.fits, false);
++  assert.equal(over.remaining, -1);
++});
++
++test('estimate: бюджет не задан — budget/remaining null, fits true', () => {
++  const r = TokenEstimator.estimate([msg.user('hello world')]);
++  assert.equal(r.budget, null);
++  assert.equal(r.remaining, null);
++  assert.equal(r.fits, true);
++});
++
++test('estimate: пустой диалог — total 0, пустая разбивка', () => {
++  const r = TokenEstimator.estimate([], 100);
++  assert.equal(r.total, 0);
++  assert.deepEqual(r.messages, []);
++  assert.equal(r.remaining, 100);
++  assert.equal(r.fits, true);
++});
++
++test('estimate: инвариант tokens == ceil(bytes/4) на смешанном контенте', () => {
++  const mixed = ['ok', 'привет, мир!', '👍🏻 a', '🇷🇺 flag', 'x'.repeat(33)];
++  const messages = mixed.map((c) => msg.user(c));
++  const r = TokenEstimator.estimate(messages);
++  for (const m of r.messages) {
++    assert.equal(m.tokens, Math.ceil(m.bytes / TokenEstimator.BYTES_PER_TOKEN));
++    assert.equal(m.bytes, Buffer.byteLength(mixed[m.index], 'utf8'));
++  }
++});
+diff --git a/challenge/src/core/tokenEstimator.ts b/challenge/src/core/tokenEstimator.ts
+new file mode 100644
+index 0000000..1b29666
+--- /dev/null
++++ b/challenge/src/core/tokenEstimator.ts
+@@ -0,0 +1,60 @@
++// Оценка стоимости диалога в токенах без вызова LLM и без зависимостей.
++// Точный токенизатор (BPE модели) недоступен — эвристика: ~4 байта UTF-8
++// на токен, округление вверх (консервативная оценка). Достаточно для
++// бюджетирования контекста (fits/remaining перед отправкой в LLM),
++// не для биллинга.
++
++import type { ChatMessage, Role } from './types.js';
++
++/** Оценка одного сообщения в разбивке. */
++export interface MessageEstimate {
++  index: number;
++  role: Role;
++  /** UTF-8 байты контента. */
++  bytes: number;
++  /** Оценка токенов: ceil(bytes / BYTES_PER_TOKEN). */
++  tokens: number;
++}
++
++/** Итог оценки диалога: total + разбивка + бюджет. */
++export interface TokenEstimate {
++  /** Суммарная оценка по всем сообщениям. */
++  total: number;
++  /** Разбивка по сообщениям (порядок входа). */
++  messages: MessageEstimate[];
++  /** Заданный бюджет; без бюджета — null. */
++  budget: number | null;
++  /** budget − total; без бюджета — null. */
++  remaining: number | null;
++  /** total ≤ budget; без бюджета — всегда true (нечего превышать). */
++  fits: boolean;
++}
++
++export class TokenEstimator {
++  /** Среднее число UTF-8 байт на токен (эвристика, не биллинг). */
++  static readonly BYTES_PER_TOKEN = 4;
++
++  /** Оценка одной строки: UTF-8 байты + ceil(bytes / 4) токенов. */
++  static estimateText(content: string): { bytes: number; tokens: number } {
++    const bytes = Buffer.byteLength(content, 'utf8');
++    return { bytes, tokens: Math.ceil(bytes / TokenEstimator.BYTES_PER_TOKEN) };
++  }
++
++  /** Оценка диалога: total, разбивка по сообщениям, остаток бюджета и fits. */
++  static estimate(messages: ChatMessage[], budget?: number): TokenEstimate {
++    const perMessage = messages.map((m, index) => ({
++      index,
++      role: m.role,
++      ...TokenEstimator.estimateText(m.content),
++    }));
++    const total = perMessage.reduce((sum, m) => sum + m.tokens, 0);
++    const hasBudget = budget !== undefined;
++    return {
++      total,
++      messages: perMessage,
++      budget: hasBudget ? budget : null,
++      remaining: hasBudget ? budget - total : null,
++      fits: !hasBudget || total <= budget,
++    };
++  }
++}
+diff --git a/web/app/api/tokens/estimate/route.ts b/web/app/api/tokens/estimate/route.ts
+new file mode 100644
+index 0000000..7a62e2f
+--- /dev/null
++++ b/web/app/api/tokens/estimate/route.ts
+@@ -0,0 +1,29 @@
++// POST /api/tokens/estimate — оценка токенов диалога ДО отправки в LLM.
++// Чистый расчёт через core TokenEstimator (эвристика UTF-8 байты / 4,
++// ceil) — без LLM-вызова, БД и новых зависимостей. Вход — zod-граница
++// tokenEstimateSchema (тип/длина/enum): messages (role/content ≤8000,
++// ≤200 шт.) + опциональный budget (целый ≥0). Ответ: total, разбивка по
++// сообщениям, budget/remaining (null без бюджета) и fits (без бюджета
++// всегда true). Ошибки: 400 (zod/не-JSON).
++import 'server-only';
++import { NextRequest, NextResponse } from 'next/server';
++
++import { tokenEstimateSchema } from '../../../../lib/shared/forms';
++import { TokenEstimator } from '../../../../lib/server/challenge';
++
++export const runtime = 'nodejs';
++export const dynamic = 'force-dynamic';
++
++export async function POST(req: NextRequest): Promise<Response> {
++  const parsed = tokenEstimateSchema.safeParse(await req.json().catch(() => ({})));
++  if (!parsed.success) {
++    return NextResponse.json(
++      { error: parsed.error.issues[0]?.message ?? 'invalid request' },
++      { status: 400, headers: { 'Cache-Control': 'no-store' } },
++    );
++  }
++
++  const { messages, budget } = parsed.data;
++  const estimate = TokenEstimator.estimate(messages, budget);
++  return NextResponse.json(estimate, { headers: { 'Cache-Control': 'no-store' } });
++}
+diff --git a/web/lib/server/challenge.ts b/web/lib/server/challenge.ts
+index 9e92441..a93bfdf 100644
+--- a/web/lib/server/challenge.ts
++++ b/web/lib/server/challenge.ts
+@@ -34,8 +34,11 @@ export { Constraints } from '@challenge/core/constraints';
+ export type { Constraint, ConstraintType } from '@challenge/core/constraints';
+ export { FullHistory, SlidingWindow, StickyFacts, Branching } from '@challenge/core/strategy';
+ export type { ContextStrategy } from '@challenge/core/strategy';
+-// P2b: sanitize tainted-инструкции (profile-edit) перед передачей в LLM.
++// P3b: sanitize tainted-инструкции (profile-edit) перед передачей в LLM.
+ export { clean } from '@challenge/core/sanitize';
++// Оценка токенов диалога (эвристика bytes/4, без LLM) для /api/tokens/estimate.
++export { TokenEstimator } from '@challenge/core/tokenEstimator';
++export type { MessageEstimate, TokenEstimate } from '@challenge/core/tokenEstimator';
+ // P3a: RAG-chat каталог + aliases, DialogDb task-state, TG-source filter для Retriever.
+ export {
+   loadChatTitles,
+diff --git a/web/lib/shared/forms.ts b/web/lib/shared/forms.ts
+index eee8d65..0e22506 100644
+--- a/web/lib/shared/forms.ts
++++ b/web/lib/shared/forms.ts
+@@ -453,3 +453,28 @@ export function noteFileError(name: string, size: number): string | null {
+   }
+   return null;
+ }
++
++// --- Токены: оценка бюджета диалога ---
++
++// POST /api/tokens/estimate — оценка токенов диалога (эвристика bytes/4,
++// TokenEstimator в core; LLM не вызывается). role — enum из core Role;
++// content БЕЗ trim(): оценка считает реальные байты, обрезка исказила бы
++// результат. budget опционален: нет → remaining/fits бессмысленны
++// (budget/remaining = null, fits = true).
++export const tokenEstimateSchema = z.object({
++  messages: z
++    .array(
++      z.object({
++        role: z.enum(['system', 'user', 'assistant']),
++        content: z.string().max(8000, 'Слишком длинное сообщение — максимум 8000 символов'),
++      }),
++    )
++    .max(200, 'Слишком много сообщений — максимум 200'),
++  budget: z
++    .number()
++    .int('budget должен быть целым числом')
++    .min(0, 'budget не может быть отрицательным')
++    .max(10_000_000, 'budget слишком большой')
++    .optional(),
++});
++export type TokenEstimateInput = z.infer<typeof tokenEstimateSchema>;
+diff --git a/web/test/unit/tokens-estimate-route.spec.ts b/web/test/unit/tokens-estimate-route.spec.ts
+new file mode 100644
+index 0000000..7058926
+--- /dev/null
++++ b/web/test/unit/tokens-estimate-route.spec.ts
+@@ -0,0 +1,155 @@
++// Unit: Route Handler POST /api/tokens/estimate — оценка токенов диалога
++// (эвристика core TokenEstimator: UTF-8 байты / 4, без LLM). Контракт:
++// 200 {total, messages[], budget, remaining, fits} / 400 (zod/не-JSON).
++// Бюджет опционален: не задан → budget/remaining = null, fits = true.
++// Chokepoint подменяется реальным чистым модулем core (tokenEstimator) —
++// тяжёлый граф core (telegram/БД) в тест не тянется.
++//
++// Динамические import() ниже обязательны: vi.mock поднимается хойстингом
++// наверх файла, поэтому реальный импорт роута возможен только ПОСЛЕ
++// применения моков — в beforeAll; фабрика vi.mock тоже асинхронная
++// (конвенция остальных route-спеков этого репозитория).
++import { beforeAll, describe, expect, it, vi } from 'vitest';
++import { NextRequest } from 'next/server';
++
++vi.mock('../../lib/server/challenge', async () => {
++  const { TokenEstimator } = await import('@challenge/core/tokenEstimator');
++  return { TokenEstimator };
++});
++
++let POST: (req: NextRequest) => Promise<Response>;
++
++beforeAll(async () => {
++  const mod = await import('../../app/api/tokens/estimate/route');
++  POST = mod.POST;
++});
++
++function req(body: unknown): NextRequest {
++  return new NextRequest('http://127.0.0.1:3000/api/tokens/estimate', {
++    method: 'POST',
++    headers: { 'content-type': 'application/json' },
++    body: JSON.stringify(body),
++  });
++}
++
++function rawReq(body: string): NextRequest {
++  return new NextRequest('http://127.0.0.1:3000/api/tokens/estimate', {
++    method: 'POST',
++    headers: { 'content-type': 'application/json' },
++    body,
++  });
++}
++
++describe('POST /api/tokens/estimate', () => {
++  it('200: total + разбивка по сообщениям + бюджет (ASCII и кириллица)', async () => {
++    const res = await POST(
++      req({
++        messages: [
++          { role: 'user', content: 'hello' }, // 5 байт → 2
++          { role: 'assistant', content: 'привет' }, // 12 байт → 3
++        ],
++        budget: 10,
++      }),
++    );
++    expect(res.status).toBe(200);
++    expect(res.headers.get('Cache-Control')).toBe('no-store');
++    await expect(res.json()).resolves.toEqual({
++      total: 5,
++      budget: 10,
++      remaining: 5,
++      fits: true,
++      messages: [
++        { index: 0, role: 'user', bytes: 5, tokens: 2 },
++        { index: 1, role: 'assistant', bytes: 12, tokens: 3 },
++      ],
++    });
++  });
++
++  it('200: total > budget → fits false, remaining отрицательный', async () => {
++    const res = await POST(
++      req({
++        messages: [{ role: 'user', content: 'hello world' }], // 11 байт → 3
++        budget: 2,
++      }),
++    );
++    expect(res.status).toBe(200);
++    const body = (await res.json()) as { total: number; remaining: number; fits: boolean };
++    expect(body.total).toBe(3);
++    expect(body.remaining).toBe(-1);
++    expect(body.fits).toBe(false);
++  });
++
++  it('200: total == budget — граница, fits true и remaining 0', async () => {
++    const res = await POST(
++      req({
++        messages: [{ role: 'user', content: 'abcd' }], // 4 байта → 1
++        budget: 1,
++      }),
++    );
++    expect(res.status).toBe(200);
++    const body = (await res.json()) as { remaining: number; fits: boolean };
++    expect(body.remaining).toBe(0);
++    expect(body.fits).toBe(true);
++  });
++
++  it('200: без бюджета — budget/remaining null, fits true', async () => {
++    const res = await POST(req({ messages: [{ role: 'system', content: 'ok' }] }));
++    expect(res.status).toBe(200);
++    await expect(res.json()).resolves.toEqual({
++      total: 1,
++      budget: null,
++      remaining: null,
++      fits: true,
++      messages: [{ index: 0, role: 'system', bytes: 2, tokens: 1 }],
++    });
++  });
++
++  it('200: пустой диалог — total 0 и пустая разбивка', async () => {
++    const res = await POST(req({ messages: [], budget: 100 }));
++    expect(res.status).toBe(200);
++    const body = (await res.json()) as { total: number; messages: unknown[]; remaining: number };
++    expect(body.total).toBe(0);
++    expect(body.messages).toEqual([]);
++    expect(body.remaining).toBe(100);
++  });
++
++  it('400: неизвестная роль (enum)', async () => {
++    const res = await POST(req({ messages: [{ role: 'tool', content: 'x' }] }));
++    expect(res.status).toBe(400);
++    const body = (await res.json()) as { error: string };
++    expect(body.error).toBeTruthy();
++  });
++
++  it('400: messages отсутствует / не массив', async () => {
++    for (const body of [{}, { messages: 'nope' }]) {
++      const res = await POST(req(body));
++      expect(res.status).toBe(400);
++    }
++  });
++
++  it('400: content длиннее 8000 и messages больше 200', async () => {
++    const long = await POST(
++      req({ messages: [{ role: 'user', content: 'x'.repeat(8001) }] }),
++    );
++    expect(long.status).toBe(400);
++
++    const many = await POST(
++      req({
++        messages: Array.from({ length: 201 }, () => ({ role: 'user', content: 'hi' })),
++      }),
++    );
++    expect(many.status).toBe(400);
++  });
++
++  it('400: budget отрицательный / дробный / не число', async () => {
++    for (const budget of [-1, 1.5, '10']) {
++      const res = await POST(req({ messages: [{ role: 'user', content: 'ok' }], budget }));
++      expect(res.status).toBe(400);
++    }
++  });
++
++  it('400: не-JSON тело', async () => {
++    const res = await POST(rawReq('not json'));
++    expect(res.status).toBe(400);
++  });
++});
