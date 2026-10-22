@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { SectionHead } from '../../components/ui/SectionHead';
 import { Button } from '../../components/ui/Button';
+import { Card } from '../../components/ui/Card';
 import { Badge, statusBadge } from '../../components/ui/Badge';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Skeleton } from '../../components/ui/Skeleton';
@@ -138,6 +139,36 @@ export default function BlogPostsPage() {
           </span>
         }
       />
+
+      <Card label="как пользоваться · 4 шага">
+        <ol className="grid gap-2 text-sm text-ink sm:grid-cols-2">
+          <li>
+            <span className="text-dim">1.</span> Выберите блог: фильтр выше или
+            страницы <Link href="/blog/news" className="text-accent hover:underline">/blog/news</Link>,{' '}
+            <Link href="/blog/pipeline" className="text-accent hover:underline">/blog/pipeline</Link>,{' '}
+            <Link href="/blog/digest" className="text-accent hover:underline">/blog/digest</Link>.
+          </li>
+          <li>
+            <span className="text-dim">2.</span> Создайте черновик: свежие новости → пост
+            или полный конвейер блог-агентов.
+          </li>
+          <li>
+            <span className="text-dim">3.</span> Откройте пост из списка ниже, проверьте
+            текст и при необходимости отредактируйте.
+          </li>
+          <li>
+            <span className="text-dim">4.</span> Опубликуйте в Telegram из карточки поста;
+            статус отправки появится в колонке «telegram».
+          </li>
+        </ol>
+        <p className="mt-3 text-xs leading-relaxed text-dim">
+          Новый блог: задайте RSS-источники и профиль голоса через{' '}
+          <code className="font-mono text-[11px]">PATCH /api/blogs/&lt;slug&gt;</code>.
+          Профиль голоса создаётся в <Link href="/chat" className="text-accent hover:underline">/chat</Link>{' '}
+          командой <code className="font-mono text-[11px]">/profile</code>. Без профиля и
+          источников генерация для блога недоступна.
+        </p>
+      </Card>
 
       {loading && posts.length === 0 ? (
         <div className="space-y-2">
