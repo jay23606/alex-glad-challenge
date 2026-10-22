@@ -1,6 +1,7 @@
 // Публикация постов в Telegram-канал.
 // Использует Telegram Bot API через fetch.
-// Токен и chat_id берутся из .env: TG_BOT_TOKEN, TG_CHAT_ID.
+// Токен — из .env (TG_BOT_TOKEN); chat_id — из .env (TG_CHAT_ID) или
+// передан явно (мульти-блог: blogs.tg_chat_id).
 // Прокси через HTTPS_PROXY (HTTP/HTTPS прокси, например gost → socks5).
 
 import { netFetch } from '../net.js';
@@ -29,17 +30,21 @@ export async function getBotInfo(): Promise<Record<string, unknown> | null> {
   }
 }
 
-export async function publishPost(text: string, parseMode: 'HTML' | 'none' = 'HTML'): Promise<PublishResult> {
+export async function publishPost(
+  text: string,
+  parseMode: 'HTML' | 'none' = 'HTML',
+  chatId?: string,
+): Promise<PublishResult> {
   const token = process.env['TG_BOT_TOKEN'];
-  const chatId = process.env['TG_CHAT_ID'];
+  const targetChat = chatId ?? process.env['TG_CHAT_ID'];
 
-  if (!token || !chatId) {
+  if (!token || !targetChat) {
     return { ok: false, error: 'TG_BOT_TOKEN или TG_CHAT_ID не заданы в .env' };
   }
 
   const url = `https://api.telegram.org/bot${token}/sendMessage`;
   const body = JSON.stringify({
-    chat_id: Number(chatId),
+    chat_id: Number(targetChat),
     text,
     parse_mode: parseMode === 'HTML' ? 'HTML' : undefined,
     disable_web_page_preview: true,

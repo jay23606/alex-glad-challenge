@@ -20,12 +20,15 @@ export interface NewsFetchResult {
 export class NewsFetcher {
   constructor(private client: LlmClient) {}
 
-  async fetch(db: BlogDb, opts: { maxAgeHours?: number; topK?: number } = {}): Promise<NewsFetchResult> {
+  async fetch(
+    db: BlogDb,
+    opts: { maxAgeHours?: number; topK?: number; blogId?: number | null; focus?: string } = {},
+  ): Promise<NewsFetchResult> {
     const maxAgeHours = opts.maxAgeHours ?? 24;
     const topK = opts.topK ?? 5;
 
     const since = new Date(Date.now() - maxAgeHours * 3600_000).toISOString();
-    const candidates = db.unusedNewsSince(since);
+    const candidates = db.unusedNewsSince(since, opts.blogId);
 
     if (candidates.length === 0) {
       return { ranked: [], rawCount: 0 };
@@ -47,7 +50,8 @@ export class NewsFetcher {
       published_at: n.published_at,
     }));
 
-    const prompt = `Из списка новостей ниже выбери топ-${topK} самых хайповых и важных (приоритет: Челси, АПЛ, топ-игроки, ЧМ, трансферы).
+    const priority = opts.focus ?? 'Челси, АПЛ, топ-игроки, ЧМ, трансферы';
+    const prompt = `Из списка новостей ниже выбери топ-${topK} самых важных для аудитории канала (приоритет: ${priority}).
 
 Новости:
 ${JSON.stringify(payload, null, 2)}

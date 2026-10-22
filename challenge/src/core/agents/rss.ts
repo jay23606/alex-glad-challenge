@@ -24,6 +24,20 @@ const FEEDS: Array<{ source: string; url: string }> = [
   { source: 'skysports.com (EPL)', url: 'https://www.skysports.com/rss/12040' },
 ];
 
+// Источники блога хранятся как JSON-массив URL (blogs.sources); имя источника —
+// hostname без www (в БД оно только для показа).
+export function feedsFromUrls(urls: string[]): Array<{ source: string; url: string }> {
+  return urls.map((url) => {
+    let host = url;
+    try {
+      host = new URL(url).hostname.replace(/^www\./, '');
+    } catch {
+      // невалидный URL оставляем как есть — фетч честно вернёт ошибку фида
+    }
+    return { source: host, url };
+  });
+}
+
 // Нормализовать нестандартные сокращения часовых поясов (BST, EST, ...)
 // в числовое смещение, чтобы Date.parse понимал.
 function normalizeTz(s: string): string {
@@ -84,9 +98,11 @@ async function fetchFeed(feed: { source: string; url: string }): Promise<RssItem
   }));
 }
 
-export async function fetchAllFeedsDetailed(): Promise<{ items: RssItem[]; errors: string[] }> {
+export async function fetchAllFeedsDetailed(
+  feeds: Array<{ source: string; url: string }> = FEEDS,
+): Promise<{ items: RssItem[]; errors: string[] }> {
   const settled = await Promise.all(
-    FEEDS.map(async (feed) => {
+    feeds.map(async (feed) => {
       try {
         return { items: await fetchFeed(feed), error: null as string | null };
       } catch (err) {
@@ -101,8 +117,10 @@ export async function fetchAllFeedsDetailed(): Promise<{ items: RssItem[]; error
   };
 }
 
-export async function fetchAllFeeds(): Promise<RssItem[]> {
-  return (await fetchAllFeedsDetailed()).items;
+export async function fetchAllFeeds(
+  feeds: Array<{ source: string; url: string }> = FEEDS,
+): Promise<RssItem[]> {
+  return (await fetchAllFeedsDetailed(feeds)).items;
 }
 
 // Отфильтровать по давности (по умолчанию — последние 24 часа).
@@ -117,7 +135,9 @@ export function filterRecent(items: RssItem[], maxAgeHours = 24): RssItem[] {
 }
 
 // Конвертация RssItem в формат строки БД.
-export function toNewsRow(item: RssItem): Omit<NewsRow, 'id' | 'used' | 'created_at'> {
+export function toNewsRow(
+  item: RssItem,
+): Omit<NewsRow, 'id' | 'used' | 'created_at' | 'blog_id'> {
   const published = new Date(Date.parse(normalizeTz(item.pubDate))).toISOString();
   return {
     url: item.link,

@@ -153,11 +153,14 @@ export type AliasActionInput = z.infer<typeof aliasActionSchema>;
 // POST /api/blog/news (SSE) — news-pipeline opts. Зеркало cli runNewsCommand flags
 // (--hours/--top/--for). Поле `forIndex` соответствует `writeForIndex` в runNewsPipeline
 // (имя `for` зарезервировано, не используем как ключ-деструктуризацию).
+// blog — slug блога (мульти-блог): определяет RSS-источники, профиль голоса и
+// штамп blog_id; отсутствует → легаси-режим (блог по умолчанию на сервере).
 export const newsOptsSchema = z.object({
   hours: z.coerce.number().int().min(1, 'hours: 1..168').max(168).optional(),
   top: z.coerce.number().int().min(1, 'top: 1..50').max(50).optional(),
   forIndex: z.coerce.number().int().min(0).optional(),
   llm: z.enum(['local', 'cloud']).optional(),
+  blog: z.string().trim().min(1).max(100).optional(),
 });
 export type NewsOptsInput = z.infer<typeof newsOptsSchema>;
 
@@ -167,9 +170,11 @@ export const postUpdateSchema = z.object({
 });
 export type PostUpdateInput = z.infer<typeof postUpdateSchema>;
 
-// POST /api/blog/style — образец стиля.
+// POST /api/blog/style — образец стиля. blog — slug блога (few-shot пул блога);
+// отсутствует → легаси-общий пул (blog_id NULL).
 export const styleSampleSchema = z.object({
   text: z.string().trim().min(1, 'Текст обязателен').max(4000, 'Слишком длинный образец'),
+  blog: z.string().trim().min(1).max(100).optional(),
 });
 export type StyleSampleInput = z.infer<typeof styleSampleSchema>;
 
@@ -288,11 +293,32 @@ export type TgPublishInput = z.infer<typeof tgPublishSchema>;
 
 // POST /api/blog/digest/generate — окно дайджеста в днях по published_at (включая
 // used). Дефолт 7 — на сервере (контракт П-1: поле оставляет расширение окна UI
-// без ломки контракта).
+// без ломки контракта). blog — slug блога: новости и голос канала этого блога.
 export const digestGenerateSchema = z.object({
   days: z.coerce.number().int().min(1).max(30).optional(),
+  blog: z.string().trim().min(1).max(100).optional(),
 });
 export type DigestGenerateInput = z.infer<typeof digestGenerateSchema>;
+
+// PATCH /api/blogs/[slug] — настройка блога (имя, профиль голоса, TG-чат,
+// RSS-источники). profile: имя из /chat-профилей или null (сброс). sources:
+// массив http(s)-URL (≤20); [] сбрасывает на дефолтные фиды (null в БД).
+export const blogPatchSchema = z.object({
+  name: z.string().trim().min(1, 'Имя обязательно').max(120).optional(),
+  profile: z.string().trim().max(100).nullable().optional(),
+  tgChatId: z.string().trim().max(100).nullable().optional(),
+  sources: z
+    .array(
+      z
+        .string()
+        .trim()
+        .max(500)
+        .regex(/^https?:\/\//, 'Источник должен быть http(s)-URL'),
+    )
+    .max(20, 'Источников — не больше 20')
+    .optional(),
+});
+export type BlogPatchInput = z.infer<typeof blogPatchSchema>;
 
 // --- Day 36: admin-auth ---
 

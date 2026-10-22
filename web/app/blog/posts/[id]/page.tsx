@@ -28,6 +28,13 @@ interface PostData {
   created_at: string;
 }
 
+interface BlogInfo {
+  id: number;
+  slug: string;
+  name: string;
+  tgChatId: string | null;
+}
+
 interface TgStatus {
   status: 'ok' | 'error';
   messageId: number | null;
@@ -42,6 +49,7 @@ export default function BlogPostDetailPage() {
   const id = typeof params?.id === 'string' ? params.id : Array.isArray(params?.id) ? params.id[0] : '';
 
   const [post, setPost] = useState<PostData | null>(null);
+  const [blog, setBlog] = useState<BlogInfo | null>(null);
   const [tg, setTg] = useState<TgStatus | null>(null);
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
@@ -58,8 +66,9 @@ export default function BlogPostDetailPage() {
         const j = (await resp.json().catch(() => ({}))) as { error?: string };
         throw new Error(j.error ?? `HTTP ${resp.status}`);
       }
-      const data = (await resp.json()) as { post: PostData; tg: TgStatus | null };
+      const data = (await resp.json()) as { post: PostData; blog: BlogInfo | null; tg: TgStatus | null };
       setPost(data.post);
+      setBlog(data.blog ?? null);
       setTg(data.tg);
       setDraft(data.post.content);
     } catch (e) {
@@ -151,7 +160,7 @@ export default function BlogPostDetailPage() {
         description={
           post ? (
             <span className="font-mono text-xs">
-              news_id: {post.news_id ?? '—'} · {post.created_at}
+              {blog ? `${blog.name} · ` : ''}news_id: {post.news_id ?? '—'} · {post.created_at}
             </span>
           ) : undefined
         }
@@ -255,7 +264,11 @@ export default function BlogPostDetailPage() {
         body={
           <div className="space-y-3">
             <p className="flex items-center gap-2">
-              Канал: <Badge tone="accent">{channelLabel ?? 'TG_CHAT_ID'}</Badge>
+              Канал:{' '}
+              <Badge tone="accent">
+                {blog?.tgChatId ?? channelLabel ?? 'TG_CHAT_ID'}
+              </Badge>
+              {blog && <span className="text-xs text-dim">(блог «{blog.name}»)</span>}
             </p>
             <p className="rounded-md border border-warn/40 bg-warn/10 p-2 text-xs text-warn">
               Реальная отправка — сообщение уйдёт подписчикам канала.

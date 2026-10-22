@@ -1,14 +1,16 @@
 // /blog/posts — список постов (ТЗ §8.4): таблица на desktop, карточки на mobile.
-// Колонки: # · превью · verdict · created · статус TG (join outbox) · действия
+// Колонки: # · превью · блог · verdict · created · статус TG (join outbox) · действия
 // (открыть / удалить через ConfirmDialog — инлайн-publish из списка сознательно
-// не делается, опасные кнопки только в карточке поста). Пустое состояние —
-// EmptyState с путём создания постов. 'use client'. НИКАКИХ импортов core/.
+// не делается, опасные кнопки только в карточке поста). Фильтр по блогу
+// (?blog=slug, мульти-блог). Пустое состояние — EmptyState с путём создания
+// постов. 'use client'. НИКАКИХ импортов core/.
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { SectionHead } from '../../components/ui/SectionHead';
 import { Button } from '../../components/ui/Button';
+import { Card } from '../../components/ui/Card';
 import { Badge, statusBadge } from '../../components/ui/Badge';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Skeleton } from '../../components/ui/Skeleton';
@@ -16,6 +18,12 @@ import { Tooltip } from '../../components/ui/Tooltip';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useToast } from '../../components/ui/Toast';
 import { IconChevronRight, IconExternal, IconTrash } from '../../components/ui/icons';
+import { INPUT_CLASS } from '../../components/ui/Field';
+
+interface BlogOption {
+  slug: string;
+  name: string;
+}
 
 interface PostItem {
   id: number;
@@ -23,6 +31,7 @@ interface PostItem {
   content: string;
   verdict: string | null;
   created_at: string;
+  blog: { id: number; slug: string; name: string } | null;
   tg: {
     status: 'ok' | 'error';
     messageId: number | null;
@@ -56,13 +65,22 @@ const TH = 'px-3 py-2 text-xs font-medium text-dim';
 export default function BlogPostsPage() {
   const { toast } = useToast();
   const [posts, setPosts] = useState<PostItem[]>([]);
+  const [blogs, setBlogs] = useState<BlogOption[]>([]);
+  const [blogFilter, setBlogFilter] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState<PostItem | null>(null);
+
+  useEffect(() => {
+    fetch('/api/blogs')
+      .then((r) => r.json())
+      .then((j: { blogs?: BlogOption[] }) => setBlogs(j.blogs ?? []))
+      .catch(() => setBlogs([]));
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const resp = await fetch('/api/blog/posts?limit=50', { method: 'GET' });
+      const resp = await fetch(`/api/blog/posts?limit=50${blogFilter ? `&blog=${encodeURIComponent(blogFilter)}` : ''}`, { method: 'GET' });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = (await resp.json()) as { posts: PostItem[] };
       setPosts(data.posts ?? []);
@@ -71,7 +89,7 @@ export default function BlogPostsPage() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, blogFilter]);
 
   useEffect(() => {
     void load();
@@ -101,11 +119,56 @@ export default function BlogPostsPage() {
         title="Посты блога"
         description="Правка и публикация в Telegram — из карточки поста."
         actions={
-          <Button variant="ghost" size="sm" onClick={load} disabled={loading}>
-            {loading ? 'загрузка…' : 'обновить'}
-          </Button>
+          <span className="flex items-center gap-2">
+            <select
+              aria-label="Фильтр по блогу"
+              className={`${INPUT_CLASS} h-9 max-w-56 text-sm`}
+              value={blogFilter}
+              onChange={(e) => setBlogFilter(e.target.value)}
+            >
+              <option value="">все блоги</option>
+              {blogs.map((b) => (
+                <option key={b.slug} value={b.slug}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+            <Button variant="ghost" size="sm" onClick={load} disabled={loading}>
+              {loading ? 'загрузка…' : 'обновить'}
+            </Button>
+          </span>
         }
       />
+
+      <Card label="как пользоваться · 4 шага">
+        <ol className="grid gap-2 text-sm text-ink sm:grid-cols-2">
+          <li>
+            <span className="text-dim">1.</span> Выберите блог: фильтр выше или
+            страницы <Link href="/blog/news" className="text-accent hover:underline">/blog/news</Link>,{' '}
+            <Link href="/blog/pipeline" className="text-accent hover:underline">/blog/pipeline</Link>,{' '}
+            <Link href="/blog/digest" className="text-accent hover:underline">/blog/digest</Link>.
+          </li>
+          <li>
+            <span className="text-dim">2.</span> Создайте черновик: свежие новости → пост
+            или полный конвейер блог-агентов.
+          </li>
+          <li>
+            <span className="text-dim">3.</span> Откройте пост из списка ниже, проверьте
+            текст и при необходимости отредактируйте.
+          </li>
+          <li>
+            <span className="text-dim">4.</span> Опубликуйте в Telegram из карточки поста;
+            статус отправки появится в колонке «telegram».
+          </li>
+        </ol>
+        <p className="mt-3 text-xs leading-relaxed text-dim">
+          Новый блог: задайте RSS-источники и профиль голоса через{' '}
+          <code className="font-mono text-[11px]">PATCH /api/blogs/&lt;slug&gt;</code>.
+          Профиль голоса создаётся в <Link href="/chat" className="text-accent hover:underline">/chat</Link>{' '}
+          командой <code className="font-mono text-[11px]">/profile</code>. Без профиля и
+          источников генерация для блога недоступна.
+        </p>
+      </Card>
 
       {loading && posts.length === 0 ? (
         <div className="space-y-2">
@@ -132,6 +195,7 @@ export default function BlogPostsPage() {
                 <tr className="border-b border-line text-left">
                   <th className={TH}>#</th>
                   <th className={TH}>превью</th>
+                  <th className={TH}>блог</th>
                   <th className={TH}>verdict</th>
                   <th className={TH}>created</th>
                   <th className={TH}>telegram</th>
@@ -154,6 +218,13 @@ export default function BlogPostsPage() {
                           {/* Аффорданс строки-ссылки: «увидел стрелку — можно нажать» */}
                           <IconChevronRight className="h-3.5 w-3.5 shrink-0 text-accent transition-transform duration-fast group-hover:translate-x-0.5" />
                         </Link>
+                      </td>
+                      <td className="max-w-32 px-3 py-2">
+                        {p.blog ? (
+                          <Badge tone="dim">{p.blog.name}</Badge>
+                        ) : (
+                          <span className="text-dim">—</span>
+                        )}
                       </td>
                       <td className="px-3 py-2">{v ? <Badge tone={v.tone}>{v.text}</Badge> : <span className="text-dim">—</span>}</td>
                       <td className="whitespace-nowrap px-3 py-2 font-mono text-xs tabular-nums text-dim">{p.created_at}</td>
@@ -208,6 +279,7 @@ export default function BlogPostsPage() {
                       {p.tg ? statusBadge(p.tg.status === 'ok' ? 'published' : 'error') : statusBadge('draft')}
                     </span>
                   </div>
+                  {p.blog && <p className="mt-1 text-xs text-dim">{p.blog.name}</p>}
                   <Link href={`/blog/posts/${p.id}`} className="mt-2 flex items-start gap-1.5 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-dim">
                     <span className="min-w-0 flex-1">{snippet(p.content, 180)}</span>
                     <IconChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />

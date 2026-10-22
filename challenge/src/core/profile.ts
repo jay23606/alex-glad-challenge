@@ -16,6 +16,8 @@ import type { ChatMessage } from './types.js';
 import { msg } from './types.js';
 
 export interface UserProfile {
+  канал: string;      // название канала/блога: шапка поста и самоподача автора
+  тематика: string;   // о чём канал — строка роли в system-промпте писателя
   любимый_клуб: string;
   стиль: string;
   формат_абзацев: string;
@@ -29,6 +31,8 @@ export interface UserProfile {
 }
 
 const DEFAULT_PROFILE: UserProfile = {
+  канал: 'Иди на факты глянь',
+  тематика: 'футбол: Челси и английская Премьер-лига',
   любимый_клуб: 'Челси',
   стиль: 'ироничный, резкий, с подколами',
   формат_абзацев: '2-4 предложения на абзац, пустая строка между ними',

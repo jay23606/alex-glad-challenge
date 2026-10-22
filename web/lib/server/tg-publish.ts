@@ -79,6 +79,8 @@ export async function publishToTelegram(
   source: OutboxSource,
   blogPostId?: number,
   parseMode: 'HTML' | 'none' = 'HTML',
+  // Мульти-блог: chat_id канала блога; undefined → общий TG_CHAT_ID (внутри publishPost).
+  chatId?: string,
 ): Promise<TgPublishOutcome> {
   if (!isTelegramConfigured()) {
     const outcome: TgPublishOutcome = { ok: false, errorKind: 'not-configured' };
@@ -86,7 +88,7 @@ export async function publishToTelegram(
   }
 
   const payload = parseMode === 'HTML' ? sanitizeTgHtml(text) : text;
-  const result = await publishPost(payload, parseMode);
+  const result = await publishPost(payload, parseMode, chatId);
 
   if (result.ok) {
     await withDb(() =>

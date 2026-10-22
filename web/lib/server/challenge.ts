@@ -9,8 +9,8 @@
 import 'server-only';
 
 export { dataPath, DATA_DIR } from '@challenge/core/paths';
-export { BlogDb } from '@challenge/core/db';
-export type { NewsRow, PostRow, StyleSampleRow } from '@challenge/core/db';
+export { BlogDb, DEFAULT_BLOG_SLUG } from '@challenge/core/db';
+export type { NewsRow, PostRow, StyleSampleRow, BlogRow } from '@challenge/core/db';
 export { RagStore } from '@challenge/core/rag/store';
 export { DialogDb } from '@challenge/core/dialogDb';
 export type { ChatRow, MessageRow } from '@challenge/core/dialogDb';

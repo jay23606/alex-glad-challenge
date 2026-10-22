@@ -1,9 +1,36 @@
 // Слой персистентности через node:sqlite (встроен в Node 24, без нативных сборок).
-// Хранит новости, посты и образцы стиля для канала "Иди на факты глянь".
+// Хранит блоги, новости, посты и образцы стиля.
+//
+// Мульти-блог: таблица blogs (голос-профиль, свой TG-чат, свои RSS-источники) +
+// blog_id в news/posts/style_samples. blog_id NULL = легаси-запись без блога
+// (старые прогоны REPL/CLI-демо) — видна только в выборках «все блоги».
+// Миграция идемпотентная, в конструкторе: seed блогов при пустой таблице +
+// ALTER/бэкфилл существующих строк в блог по умолчанию при первом обновлении.
 
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
+
+export interface BlogRow {
+  id: number;
+  slug: string;
+  name: string;
+  profile: string | null;    // имя профиля голоса в .data/profiles/<name>.json
+  tg_chat_id: string | null; // chat_id TG-канала блога; null = общий TG_CHAT_ID
+  sources: string | null;    // JSON-массив URL RSS; null = дефолтные футбольные фиды
+  created_at: string;
+}
+
+// Блог по умолчанию: весь существующий контент и дефолтные RSS-фиды — его.
+export const DEFAULT_BLOG_SLUG = 'lookatfacts';
+
+// Начальный состав блогов (seed при пустой таблице). Профили голоса и источники
+// двух новых блогов заполняются позже (PATCH /api/blogs/[slug], профили — /chat).
+const SEED_BLOGS: Array<Omit<BlogRow, 'id' | 'created_at'>> = [
+  { slug: DEFAULT_BLOG_SLUG, name: 'Иди на факты глянь', profile: 'default', tg_chat_id: null, sources: null },
+  { slug: 'artemia-artel', name: 'Артемия Артель', profile: null, tg_chat_id: null, sources: null },
+  { slug: 'nevsky-hram', name: 'Невский храм на Доваторцев', profile: null, tg_chat_id: null, sources: null },
+];
 
 export interface NewsRow {
   id: number;
@@ -14,6 +41,7 @@ export interface NewsRow {
   source: string;
   used: number;                // 0/1
   created_at: string;
+  blog_id: number | null;
 }
 
 export interface PostRow {
@@ -22,15 +50,27 @@ export interface PostRow {
   content: string;
   verdict: string | null;      // результат фактчекинга
   created_at: string;
+  blog_id: number | null;
 }
 
 export interface StyleSampleRow {
   id: number;
   text: string;
   created_at: string;
+  blog_id: number | null;
 }
 
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS blogs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  slug TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  profile TEXT,
+  tg_chat_id TEXT,
+  sources TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS news (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   url TEXT NOT NULL UNIQUE,
@@ -39,7 +79,8 @@ CREATE TABLE IF NOT EXISTS news (
   published_at TEXT NOT NULL,
   source TEXT NOT NULL,
   used INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  blog_id INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS posts (
@@ -48,13 +89,15 @@ CREATE TABLE IF NOT EXISTS posts (
   content TEXT NOT NULL,
   verdict TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  blog_id INTEGER,
   FOREIGN KEY (news_id) REFERENCES news(id)
 );
 
 CREATE TABLE IF NOT EXISTS style_samples (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   text TEXT NOT NULL UNIQUE,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  blog_id INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_news_published ON news(published_at);
@@ -69,39 +112,132 @@ export class BlogDb {
     this.db = new DatabaseSync(dbPath);
     this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec(SCHEMA);
+    this.migrateBlogs();
   }
 
   close(): void {
     this.db.close();
   }
 
+  // --- миграция мульти-блога (идемпотентно, при каждом открытии) ---
+  private migrateBlogs(): void {
+    const seeded = this.seedBlogs();
+    // На базах, созданных до мульти-блога, колонок нет — ALTER + разовый бэкфилл
+    // всего существующего контента в блог по умолчанию. На свежей БД колонки уже
+    // в CREATE, строк нет — бэкфилл не нужен.
+    const backfillTo = seeded ? this.defaultBlogId() : null;
+    for (const table of ['news', 'posts', 'style_samples']) {
+      if (!this.hasColumn(table, 'blog_id')) {
+        this.db.exec(`ALTER TABLE ${table} ADD COLUMN blog_id INTEGER`);
+        if (backfillTo !== null) {
+          this.db
+            .prepare(`UPDATE ${table} SET blog_id = ? WHERE blog_id IS NULL`)
+            .run(backfillTo);
+        }
+      }
+    }
+    // Индексы blog-колонок здесь, а не в SCHEMA: на легаси-базе колонка появляется
+    // только в ALTER выше — CREATE INDEX по ней упал бы до этого.
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_news_blog ON news(blog_id)');
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_posts_blog ON posts(blog_id)');
+  }
+
+  private hasColumn(table: string, column: string): boolean {
+    const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    return rows.some((r) => r.name === column);
+  }
+
+  // Seed при пустой таблице. true = таблица была пуста (свежая БД или
+  // до-мультибложная) — сигнал для бэкфилла.
+  private seedBlogs(): boolean {
+    const row = this.db.prepare('SELECT COUNT(*) AS n FROM blogs').get() as { n: number };
+    if (row.n > 0) return false;
+    const stmt = this.db.prepare(
+      'INSERT INTO blogs (slug, name, profile, tg_chat_id, sources) VALUES (?, ?, ?, ?, ?)',
+    );
+    for (const b of SEED_BLOGS) {
+      stmt.run(b.slug, b.name, b.profile, b.tg_chat_id, b.sources);
+    }
+    return true;
+  }
+
+  private defaultBlogId(): number | null {
+    const row = this.db
+      .prepare('SELECT id FROM blogs WHERE slug = ?')
+      .get(DEFAULT_BLOG_SLUG) as { id: number } | undefined;
+    return row ? Number(row.id) : null;
+  }
+
+  // --- blogs ---
+  listBlogs(): BlogRow[] {
+    return this.db
+      .prepare('SELECT * FROM blogs ORDER BY id')
+      .all() as unknown as BlogRow[];
+  }
+
+  getBlog(id: number): BlogRow | null {
+    const row = this.db.prepare('SELECT * FROM blogs WHERE id = ?').get(id);
+    return (row ?? null) as BlogRow | null;
+  }
+
+  getBlogBySlug(slug: string): BlogRow | null {
+    const row = this.db.prepare('SELECT * FROM blogs WHERE slug = ?').get(slug);
+    return (row ?? null) as BlogRow | null;
+  }
+
+  updateBlog(
+    id: number,
+    patch: { name?: string; profile?: string | null; tg_chat_id?: string | null; sources?: string | null },
+  ): void {
+    const sets: string[] = [];
+    const values: Array<string | null> = [];
+    for (const key of ['name', 'profile', 'tg_chat_id', 'sources'] as const) {
+      const val = patch[key];
+      if (val !== undefined) {
+        sets.push(`${key} = ?`);
+        values.push(val);
+      }
+    }
+    if (sets.length === 0) return;
+    this.db.prepare(`UPDATE blogs SET ${sets.join(', ')} WHERE id = ?`).run(...values, id);
+  }
+
   // --- news ---
-  insertNews(row: Omit<NewsRow, 'id' | 'used' | 'created_at'>): boolean {
+  insertNews(
+    row: Omit<NewsRow, 'id' | 'used' | 'created_at' | 'blog_id'>,
+    blogId?: number | null,
+  ): boolean {
     try {
       this.db
         .prepare(
-          'INSERT INTO news (url, title, summary, published_at, source) VALUES (?, ?, ?, ?, ?)',
+          'INSERT INTO news (url, title, summary, published_at, source, blog_id) VALUES (?, ?, ?, ?, ?, ?)',
         )
-        .run(row.url, row.title, row.summary, row.published_at, row.source);
+        .run(row.url, row.title, row.summary, row.published_at, row.source, blogId ?? null);
       return true;
     } catch {
       return false; // UNIQUE conflict — уже в базе
     }
   }
 
-  unusedNewsSince(iso: string): NewsRow[] {
+  unusedNewsSince(iso: string, blogId?: number | null): NewsRow[] {
+    const sql =
+      'SELECT * FROM news WHERE used = 0 AND published_at >= ?' +
+      (blogId != null ? ' AND blog_id = ?' : '') +
+      ' ORDER BY published_at DESC';
     return this.db
-      .prepare(
-        'SELECT * FROM news WHERE used = 0 AND published_at >= ? ORDER BY published_at DESC',
-      )
-      .all(iso) as unknown as NewsRow[];
+      .prepare(sql)
+      .all(...(blogId != null ? [iso, blogId] : [iso])) as unknown as NewsRow[];
   }
 
   // Все новости (включая used) с даты — окно еженедельного дайджеста.
-  newsSince(iso: string): NewsRow[] {
+  newsSince(iso: string, blogId?: number | null): NewsRow[] {
+    const sql =
+      'SELECT * FROM news WHERE published_at >= ?' +
+      (blogId != null ? ' AND blog_id = ?' : '') +
+      ' ORDER BY published_at DESC';
     return this.db
-      .prepare('SELECT * FROM news WHERE published_at >= ? ORDER BY published_at DESC')
-      .all(iso) as unknown as NewsRow[];
+      .prepare(sql)
+      .all(...(blogId != null ? [iso, blogId] : [iso])) as unknown as NewsRow[];
   }
 
   markUsed(id: number): void {
@@ -109,18 +245,27 @@ export class BlogDb {
   }
 
   // --- posts ---
-  insertPost(content: string, newsId: number | null, verdict: string | null = null): number {
+  insertPost(
+    content: string,
+    newsId: number | null,
+    verdict: string | null = null,
+    blogId?: number | null,
+  ): number {
     const stmt = this.db.prepare(
-      'INSERT INTO posts (news_id, content, verdict) VALUES (?, ?, ?)',
+      'INSERT INTO posts (news_id, content, verdict, blog_id) VALUES (?, ?, ?, ?)',
     );
-    const result = stmt.run(newsId, content, verdict);
+    const result = stmt.run(newsId, content, verdict, blogId ?? null);
     return Number(result.lastInsertRowid);
   }
 
-  recentPosts(limit = 10): PostRow[] {
+  recentPosts(limit = 10, blogId?: number | null): PostRow[] {
+    const sql =
+      'SELECT * FROM posts' +
+      (blogId != null ? ' WHERE blog_id = ?' : '') +
+      ' ORDER BY created_at DESC LIMIT ?';
     return this.db
-      .prepare('SELECT * FROM posts ORDER BY created_at DESC LIMIT ?')
-      .all(limit) as unknown as PostRow[];
+      .prepare(sql)
+      .all(...(blogId != null ? [blogId, limit] : [limit])) as unknown as PostRow[];
   }
 
   getPost(id: number): PostRow | null {
@@ -138,19 +283,25 @@ export class BlogDb {
   }
 
   // --- style_samples ---
-  addStyleSample(text: string): boolean {
+  addStyleSample(text: string, blogId?: number | null): boolean {
     try {
-      this.db.prepare('INSERT INTO style_samples (text) VALUES (?)').run(text);
+      this.db
+        .prepare('INSERT INTO style_samples (text, blog_id) VALUES (?, ?)')
+        .run(text, blogId ?? null);
       return true;
     } catch {
       return false;
     }
   }
 
-  styleSamples(limit = 10): StyleSampleRow[] {
+  styleSamples(limit = 10, blogId?: number | null): StyleSampleRow[] {
+    const sql =
+      'SELECT * FROM style_samples' +
+      (blogId != null ? ' WHERE blog_id = ?' : '') +
+      ' ORDER BY RANDOM() LIMIT ?';
     return this.db
-      .prepare('SELECT * FROM style_samples ORDER BY RANDOM() LIMIT ?')
-      .all(limit) as unknown as StyleSampleRow[];
+      .prepare(sql)
+      .all(...(blogId != null ? [blogId, limit] : [limit])) as unknown as StyleSampleRow[];
   }
 
   styleSamplesCount(): number {

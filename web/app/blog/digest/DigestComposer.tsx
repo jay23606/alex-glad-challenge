@@ -61,6 +61,12 @@ function domainOf(url: string): string {
   }
 }
 
+interface BlogOption {
+  slug: string;
+  name: string;
+  hasProfile: boolean;
+}
+
 export function DigestComposer({
   tgConfigured,
   channelLabel,
@@ -72,6 +78,8 @@ export function DigestComposer({
 
   const [phase, setPhase] = useState<Phase>('idle');
   const [days, setDays] = useState<7 | 14>(7);
+  const [blogs, setBlogs] = useState<BlogOption[]>([]);
+  const [blog, setBlog] = useState<string>('');
   const [digest, setDigest] = useState('');
   const [sources, setSources] = useState<DigestSource[]>([]);
   const [newsCount, setNewsCount] = useState(0);
@@ -87,6 +95,13 @@ export function DigestComposer({
   const generating = phase === 'generating';
 
   // Черновик: восстановление при монтировании…
+  useEffect(() => {
+    fetch('/api/blogs')
+      .then((r) => r.json())
+      .then((j: { blogs?: BlogOption[] }) => setBlogs(j.blogs ?? []))
+      .catch(() => setBlogs([]));
+  }, []);
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(DRAFT_KEY);
@@ -138,7 +153,7 @@ export function DigestComposer({
       const resp = await fetch('/api/blog/digest/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ days }),
+        body: JSON.stringify({ days, ...(blog ? { blog } : {}) }),
       });
       const j = (await resp.json().catch(() => ({}))) as {
         ok?: boolean;
@@ -230,6 +245,21 @@ export function DigestComposer({
       <Card label="сборка">
         <div className="flex flex-wrap items-end gap-3">
           <label className="text-sm">
+            <span className="block text-xs font-medium text-dim">Блог</span>
+            <select
+              className={`mt-1 min-w-48 ${INPUT_CLASS}`}
+              value={blog}
+              onChange={(e) => setBlog(e.target.value)}
+              disabled={generating}
+            >
+              {blogs.map((b) => (
+                <option key={b.slug} value={b.slug}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm">
             <span className="block text-xs font-medium text-dim">Окно</span>
             <select
               className={`mt-1 ${INPUT_CLASS}`}
@@ -246,7 +276,7 @@ export function DigestComposer({
             icon={<IconRss />}
             loading={generating}
             onClick={() => void generate()}
-            disabled={generating}
+            disabled={generating || (blog !== '' && !blogs.find((b) => b.slug === blog)?.hasProfile)}
           >
             Собрать дайджест
           </Button>

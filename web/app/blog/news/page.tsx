@@ -1,9 +1,9 @@
-// /blog/news — блог-pipeline: форма (hours/top/for/llm) → SSE → пост.
+// /blog/news — блог-pipeline: форма (блог/hours/top/for/llm) → SSE → пост.
 // 'use client': читает SSE-стрим из /api/blog/news (start → done/error). Pipeline не имеет
 // onProgress, поэтому прогресс = индикатор «работаю» от старта до done. НИКАКИХ импортов core/.
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { SseBlogNewsEvent } from '../../../lib/shared/sse';
 import { Button } from '../../components/ui/Button';
@@ -13,6 +13,15 @@ import { SectionHead } from '../../components/ui/SectionHead';
 import { INPUT_CLASS } from '../../components/ui/Field';
 
 type Llm = 'local' | 'cloud';
+
+interface BlogOption {
+  id: number;
+  slug: string;
+  name: string;
+  profile: string | null;
+  hasProfile: boolean;
+  sourcesCount: number;
+}
 
 interface DonePost {
   id: number;
@@ -25,6 +34,8 @@ interface TopNewsItem {
 }
 
 export default function BlogNewsPage() {
+  const [blogs, setBlogs] = useState<BlogOption[]>([]);
+  const [blog, setBlog] = useState<string>('');
   const [hours, setHours] = useState(24);
   const [top, setTop] = useState(5);
   const [forIndex, setForIndex] = useState(0);
@@ -38,6 +49,16 @@ export default function BlogNewsPage() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
+
+  const activeBlog = blogs.find((b) => b.slug === blog) ?? null;
+  const profileMissing = activeBlog !== null && !activeBlog.hasProfile;
+
+  useEffect(() => {
+    fetch('/api/blogs')
+      .then((r) => r.json())
+      .then((j: { blogs?: BlogOption[] }) => setBlogs(j.blogs ?? []))
+      .catch(() => setBlogs([]));
+  }, []);
 
   const reset = (): void => {
     setPost(null);
@@ -75,7 +96,7 @@ export default function BlogNewsPage() {
       const resp = await fetch('/api/blog/news', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hours, top, forIndex, llm }),
+        body: JSON.stringify({ hours, top, forIndex, llm, ...(blog ? { blog } : {}) }),
         signal: ac.signal,
       });
       if (!resp.ok || !resp.body) {
@@ -116,7 +137,7 @@ export default function BlogNewsPage() {
       setRunning(false);
       abortRef.current = null;
     }
-  }, [hours, top, forIndex, llm, running]);
+  }, [hours, top, forIndex, llm, blog, running]);
 
   const cancel = (): void => {
     abortRef.current?.abort();
@@ -129,6 +150,25 @@ export default function BlogNewsPage() {
 
       <Card label="Параметры запуска">
         <div className="flex flex-wrap items-end gap-4">
+          <label className="text-sm">
+            <span className="block text-xs font-medium text-dim">Блог</span>
+            <select
+              className={`mt-1 min-w-48 ${INPUT_CLASS}`}
+              value={blog}
+              onChange={(e) => {
+                setBlog(e.target.value);
+                reset();
+              }}
+              disabled={running}
+            >
+              {blogs.map((b) => (
+                <option key={b.slug} value={b.slug}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <label className="text-sm">
             <span className="block text-xs font-medium text-dim">Часов (hours)</span>
             <input
@@ -181,7 +221,12 @@ export default function BlogNewsPage() {
           </label>
 
           <div className="ml-auto flex gap-2">
-            <Button variant="primary" onClick={run} disabled={running}>
+            <Button
+              variant="primary"
+              onClick={run}
+              disabled={running || profileMissing}
+              title={profileMissing ? 'Сначала настройте профиль голоса блога' : undefined}
+            >
               Запустить
             </Button>
             <Button variant="ghost" onClick={cancel} disabled={!running}>
@@ -189,6 +234,14 @@ export default function BlogNewsPage() {
             </Button>
           </div>
         </div>
+        {activeBlog && (
+          <p className="mt-2 text-xs text-dim">
+            Источников в блоге: {activeBlog.sourcesCount || 'нет'}.{' '}
+            {profileMissing
+              ? 'Профиль голоса не настроен — генерация недоступна (см. /chat, /profile).'
+              : `Голос: профиль «${activeBlog.profile}».`}
+          </p>
+        )}
         <p className="mt-2 text-xs text-dim">
           Реальный прогон: пишет в blog.sqlite, ходит в RSS/LLM — может занять до минуты.
         </p>

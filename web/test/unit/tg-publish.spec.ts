@@ -27,6 +27,7 @@ let publishToTelegram: (
   source: 'manual' | 'blog' | 'summary',
   blogPostId?: number,
   parseMode?: 'HTML' | 'none',
+  chatId?: string,
 ) => Promise<Out>;
 let tgPublishResponse: (out: Out) => Response;
 let tgRateLimit: (key: string) => { ok: boolean; retryAfterSec?: number };
@@ -59,7 +60,7 @@ describe('publishToTelegram — happy path', () => {
     const out = await publishToTelegram('<b>hi</b><script>x</script>', 'manual');
 
     expect(out).toMatchObject({ ok: true, messageId: 7 });
-    expect(publishPost).toHaveBeenCalledWith('<b>hi</b>&lt;script&gt;x&lt;/script&gt;', 'HTML');
+    expect(publishPost).toHaveBeenCalledWith('<b>hi</b>&lt;script&gt;x&lt;/script&gt;', 'HTML', undefined);
 
     const [row] = getOutboxDb().recent(1);
     expect(row.status).toBe('ok');
@@ -78,7 +79,12 @@ describe('publishToTelegram — happy path', () => {
 
   it('parseMode none уходит в publishPost без HTML', async () => {
     await publishToTelegram('текст', 'manual', undefined, 'none');
-    expect(publishPost).toHaveBeenCalledWith('текст', 'none');
+    expect(publishPost).toHaveBeenCalledWith('текст', 'none', undefined);
+  });
+
+  it('chatId блога пробрасывается пятым аргументом (мульти-блог)', async () => {
+    await publishToTelegram('пост', 'blog', 24, 'HTML', '-100123');
+    expect(publishPost).toHaveBeenCalledWith('пост', 'HTML', '-100123');
   });
 });
 

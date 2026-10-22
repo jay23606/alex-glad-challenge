@@ -28,6 +28,11 @@ export async function POST(
   const post = await withDb(() => getBlogDb().getPost(id));
   if (!post) return NextResponse.json({ error: 'not found' }, { status: 404 });
 
-  const outcome = await publishToTelegram(post.content, 'blog', id);
+  // Мульти-блог: пост уходит в TG-чат своего блога (blogs.tg_chat_id),
+  // без него — в общий канал из TG_CHAT_ID (fallback внутри publishPost).
+  const blog =
+    post.blog_id !== null ? await withDb(() => getBlogDb().getBlog(post.blog_id!)) : null;
+
+  const outcome = await publishToTelegram(post.content, 'blog', id, 'HTML', blog?.tg_chat_id ?? undefined);
   return tgPublishResponse(outcome);
 }

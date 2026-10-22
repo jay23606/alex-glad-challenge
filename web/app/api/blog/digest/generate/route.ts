@@ -19,6 +19,7 @@ import { requireAuth } from '../../../../../lib/auth';
 import { getBlogDb, withDb } from '../../../../../lib/server/db';
 import { pickLlmClient } from '../../../../../lib/server/llm';
 import { getKeysStatus } from '../../../../../lib/server/env';
+import { resolveBlog, loadBlogProfile } from '../../../../../lib/server/blogs';
 import { safeMessage } from '../../../../../lib/server/safe-message';
 import { clean, msg } from '../../../../../lib/server/challenge';
 import type { ChatMessage } from '../../../../../lib/server/challenge';
@@ -32,15 +33,18 @@ const FIELD_MAX = 200;         // title/summary одной новости в п�
 const DIGEST_MAX_CHARS = 4096; // жёсткий лимит TG-сообщения
 const PROMPT_TARGET_CHARS = 3500; // буфер под лимит TG (clamp — страховка)
 
-const DIGEST_SYSTEM = [
-  'Ты — редактор телеграм-канала «Иди на факты глянь» (футбол: Челси, АПЛ). Собираешь дайджест недели.',
-  'Жёсткие правила:',
-  '1. Использовать ТОЛЬКО факты из списка новостей: не добавлять счёты, даты, имена и трансферы, которых нет в списке.',
-  '2. Каждый пункт завершается точным URL из списка — других ссылок нет.',
-  '3. Plain text, без HTML/Markdown-разметки.',
-  `4. Формат: заголовок + 5-7 пунктов вида «заголовок — 1-2 предложения — URL». Объём ≤${PROMPT_TARGET_CHARS} символов.`,
-  '5. Последняя строка: «Подборка по новостям недели — полные разборы в канале».',
-].join('\n');
+// Голос дайджеста — от блога: имя канала + тематика профиля голоса (если настроен).
+function digestSystem(channel: string, topic: string): string {
+  return [
+    `Ты — редактор телеграм-канала «${channel}»${topic ? ` (${topic})` : ''}. Собираешь дайджест недели.`,
+    'Жёсткие правила:',
+    '1. Использовать ТОЛЬКО факты из списка новостей: не добавлять факты, которых нет в списке.',
+    '2. Каждый пункт завершается точным URL из списка — других ссылок нет.',
+    '3. Plain text, без HTML/Markdown-разметки.',
+    `4. Формат: заголовок + 5-7 пунктов вида «заголовок — 1-2 предложения — URL». Объём ≤${PROMPT_TARGET_CHARS} символов.`,
+    '5. Последняя строка: «Подборка по новостям недели — полные разборы в канале».',
+  ].join('\n');
+}
 
 interface DigestNewsItem {
   title: string;
@@ -49,10 +53,10 @@ interface DigestNewsItem {
   published_at: string;
 }
 
-function digestMessages(news: DigestNewsItem[]): ChatMessage[] {
+function digestMessages(news: DigestNewsItem[], channel: string, topic: string): ChatMessage[] {
   const payload = JSON.stringify(news, null, 2);
   return [
-    msg.system(DIGEST_SYSTEM),
+    msg.system(digestSystem(channel, topic)),
     msg.user(`Собери дайджест недели ТОЛЬКО по новостям из списка.\n\nНовости:\n${payload}`),
   ];
 }
@@ -83,10 +87,26 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
   const days = parsed.data.days ?? DEFAULT_DAYS;
 
+  // Мульти-блог: blog задан → новости и голос этого блога; не задан → легаси
+  // (все новости, голос «Иди на факты глянь») — старые вызовы не ломаются.
+  let blogId: number | null | undefined;
+  let channel = 'Иди на факты глянь';
+  let topic = 'футбол: Челси, АПЛ';
+  if (parsed.data.blog) {
+    const res = resolveBlog(parsed.data.blog);
+    if (!res.blog) {
+      return Response.json({ ok: false, error: res.error ?? 'blog not found' }, { status: 400 });
+    }
+    blogId = res.blog.id;
+    channel = res.blog.name;
+    const profile = loadBlogProfile(res.blog);
+    if (profile?.active?.тематика) topic = profile.active.тематика;
+  }
+
   // Чтение окна — короткий sync-read внутри withDb; LLM-вызов ниже — вне мьютекса,
   // чтобы не блокировать админ-операции на время генерации.
   const since = new Date(Date.now() - days * 24 * 3600_000).toISOString();
-  const rows = await withDb(() => getBlogDb().newsSince(since));
+  const rows = await withDb(() => getBlogDb().newsSince(since, blogId));
   // RSS tainted: URL валидируем на сервере (параллель safeHref() в DigestComposer,
   // но на границе — до промпта), чтобы sources/newsCount и текст дайджеста
   // описывали одну выборку. Не-http(s) (javascript:/data:/битое) — дроп строки;
@@ -123,7 +143,10 @@ export async function POST(req: NextRequest): Promise<Response> {
   const keys = getKeysStatus();
   try {
     const client = pickLlmClient(keys.cloud.configured ? 'cloud' : 'local');
-    const raw = await client.chat(digestMessages(news), { temperature: 0.4, maxTokens: 1500 });
+    const raw = await client.chat(digestMessages(news, channel, topic), {
+      temperature: 0.4,
+      maxTokens: 1500,
+    });
     const trimmed = raw.trim();
     if (!trimmed) throw new Error('LLM вернул пустой дайджест');
     const { text, truncated } = clampDigest(trimmed);
