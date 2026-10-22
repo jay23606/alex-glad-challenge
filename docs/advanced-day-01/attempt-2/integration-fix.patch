@@ -1,0 +1,29 @@
+diff --git a/docs/advanced-day-01/attempt-2/files/web/test/unit/tokens-estimate-route.spec.ts b/docs/advanced-day-01/attempt-2/files-final/web/test/unit/tokens-estimate-route.spec.ts
+index a6bdc65..4ebcb41 100644
+--- a/docs/advanced-day-01/attempt-2/files/web/test/unit/tokens-estimate-route.spec.ts
++++ b/docs/advanced-day-01/attempt-2/files-final/web/test/unit/tokens-estimate-route.spec.ts
+@@ -1,10 +1,21 @@
+ // Unit: Route Handler POST /api/tokens/estimate — эвристика UTF-8 bytes / 4.
+ // Контракт: 200 {ok,total,messages:[{index,role,bytes,tokens}],budget,remaining,fits},
+-// 400 на zod/не-JSON. TokenEstimator — реальный core (через chokepoint), без моков.
+-import { describe, expect, it } from 'vitest';
++// 400 на zod/не-JSON. TokenEstimator — реальный core, но chokepoint замокан
++// до одного экспорта: иначе route тянет весь тяжёлый баррель core (telegram/DB)
++// в каждый воркер. Это мок границы, не модуля под тестом.
++import { beforeAll, describe, expect, it, vi } from 'vitest';
+ import { NextRequest } from 'next/server';
+ 
+-import { POST } from '../../app/api/tokens/estimate/route';
++vi.mock('../../lib/server/challenge', async () => {
++  const { TokenEstimator } = await import('@challenge/core/tokenEstimator');
++  return { TokenEstimator };
++});
++
++let POST: (req: NextRequest) => Promise<Response>;
++
++beforeAll(async () => {
++  ({ POST } = await import('../../app/api/tokens/estimate/route'));
++});
+ 
+ interface EstimateBody {
+   ok: boolean;

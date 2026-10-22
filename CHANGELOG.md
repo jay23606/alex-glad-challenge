@@ -816,3 +816,96 @@ FTS5-индекс, /цитата, /сказал, /игра, дизамбигуа
 - `challenge/src/core/tg/botImprov.ts` (новый) + `botImprov.test.ts`,
   `bot.test.ts`; изменены `bot.ts`, `botApi.ts`, `botQueue.ts`, `botStore.ts`,
   `botCommands.ts` и их тесты.
+
+---
+
+## ADVANCED Day 1 — Rules: `AGENTS.md` v2 + `.omp` (глобальный конфиг, субагенты, скиллы)
+**Дата:** 2026-10-19
+
+**Задание:** проанализировать проект и создать файл правил; описать стек,
+архитектуру, структуру папок, naming conventions и паттерны; использовать
+глобальный конфиг, локальный конфиг, субагентов и скиллы; включить 3–5 хороших
+примеров, 3–5 антипаттернов и шаблон типичного файла; проверить на боевой задаче
+одним промптом; усилить правила по результатам и повторить генерацию.
+
+**Что сделано:**
+- `AGENTS.md` переписан в v2 под текущую реальность: `challenge/` + `web/`,
+  scoped override Next.js, направление зависимостей, `server-only`/chokepoint,
+  `withDb`, zod-границы, `safeMessage`, naming, шаблоны core-сервиса и Route
+  Handler, тесты, Definition of Done, git-дисциплина.
+- Добавлен sticky `.omp/RULES.md` — короткие жёсткие инварианты (no `any`,
+  no `console.log` в переиспользуемом коде, SQL только `?`, surgical diff,
+  no new deps/day-NN, no commit/push без запроса).
+- Добавлены project-субагенты `.omp/agents/project-implementer.md` и
+  `project-reviewer.md`.
+- Добавлены скиллы `.omp/skills/add-core-service`, `add-web-endpoint`,
+  `project-validation`.
+- Создан глобальный `~/.omp/agent/AGENTS.md` (общие правила, проект побеждает).
+- Боевая задача: core `TokenEstimator` + `POST /api/tokens/estimate` + тесты
+  (`node:test` и Vitest). Один промпт, две генерации: v1 и v2.
+- Артефакты эксперимента: `docs/advanced-day-01/` — промпт, правила v1/v2,
+  диффы обеих генераций, оценки, сравнение и факторы качества.
+
+**Результат эксперимента:**
+- Gen1 (v1): typecheck PASS, core 101/101, route 10/10; отклонения — static-only
+  класс, мутабельные контракты, нет доменной валидации бюджета, несвязанная
+  правка комментария, нет CHANGELOG.
+- Gen2 (v2): typecheck PASS, core 105/105, route 10/10, web suite 235/235
+  (`--maxWorkers=2`); `readonly`, instance-сервис с options, `RangeError`,
+  `{ ok: true }`, `safeMessage`, CHANGELOG, без несвязанных правок.
+- Время генерации: ~12 мин → ~2 мин 42 с.
+- Smoke: `next start` на loopback → 401 без cookie, 200 после login
+  (`{ok:true,total:2,messages:[...],budget:10,remaining:8,fits:true}`).
+
+**Выводы:**
+- Сильнее всего качество улучшили шаблоны файлов, sticky-запреты и скилл
+  `add-web-endpoint`; они превратили «лучшую практику» в проверяемую форму.
+- Правила не заменяют чтение существующего кода: Gen1 был хорош именно потому,
+  что ассистент открыл `forms.ts`, `challenge.ts` и route-тесты.
+- Полный suite обязателен: он выявил, что импорт всего chokepoint-барреля в
+  route-тесте замедляет воркеры. Integration-fix мокает баррель до одного
+  экспорта; правило v2 дополнено явным разрешением boundary-мока.
+- На этом Windows-хосте `vitest run` без ограничения воркеров нестабилен
+  (timeout старта UI-воркеров); рабочий fallback — `--maxWorkers=2`.
+  `next build` проходит compile/typecheck/40 страниц, но падает на EPERM
+  symlink при standalone trace copy — ограничение окружения.
+
+**Код/артефакты:**
+- `AGENTS.md`, `.omp/RULES.md`, `.omp/agents/*`, `.omp/skills/*`,
+  `~/.omp/agent/AGENTS.md`
+- `challenge/src/core/tokenEstimator.ts` + `.test.ts`, `core/index.ts`
+- `web/app/api/tokens/estimate/route.ts`, `web/lib/shared/forms.ts`,
+  `web/lib/server/challenge.ts`, `web/test/unit/tokens-estimate-route.spec.ts`
+- `docs/advanced-day-01/**`
+
+---
+
+## Feature: оценка токенов — core `TokenEstimator` + `POST /api/tokens/estimate`
+**Дата:** 2026-10-19
+
+**Что сделано:**
+- `challenge/src/core/tokenEstimator.ts` (новый) — `TokenEstimator`: эвристика
+  `Math.ceil(UTF-8 bytes / 4)` без токенизатора и новых зависимостей.
+  `estimateText` возвращает `{bytes, tokens}` одной строки;
+  `estimate(messages, budget?)` — `total`, per-message breakdown
+  (`index/role/bytes/tokens`), `budget`, `remaining`, `fits`.
+  Инварианты: `bytesPerToken > 0`, `budget` — целое ≥ 0 (`RangeError`).
+  `total` — сумма по-сообщенных оценок, поэтому всегда сходится с breakdown;
+  без `budget` → `budget/remaining = null`, `fits = true`.
+- `challenge/src/core/index.ts` — публичный экспорт сервиса, константы и типов.
+- `web/lib/server/challenge.ts` — экспорт через единственный chokepoint.
+- `web/lib/shared/forms.ts` — `tokenEstimateSchema`: `role` enum,
+  `content` ≤ 100000 символов, `messages` ≤ 200, `budget` целое ≥ 0;
+  content не trim'ится (оценка реального промпта).
+- `web/app/api/tokens/estimate/route.ts` (новый) — POST:
+  zod-валидация → core → JSON `{ok, total, messages, budget, remaining, fits}`,
+  `Cache-Control: no-store`; 400 на zod/RangeError. Роут закрыт admin-middleware
+  (в `PUBLIC_PATHS` намеренно не добавлен).
+- Тесты: core 11 (`node:test`), web 10 (Vitest) — UTF-8 multibyte, пустые
+  входы, границы 200 сообщений/100000 символов, нулевой/недостаточный бюджет,
+  `fits`, не-JSON тело.
+
+**Риски/ограничения:**
+- Эвристика bytes/4 не токенизатор модели: на кириллице/эмодзи оценка
+  приблизительная, для бюджета контекста нужен запас.
+- Новых пакетов нет; сервис чистый (без сети/БД/`process.env`).

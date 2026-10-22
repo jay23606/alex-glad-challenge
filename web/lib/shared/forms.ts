@@ -453,3 +453,24 @@ export function noteFileError(name: string, size: number): string | null {
   }
   return null;
 }
+
+// --- Token estimate: POST /api/tokens/estimate ---
+
+// Грубая оценка токенов по UTF-8-байтам (bytes / 4) — без токенизатора.
+// content НЕ trim'ится: оценка должна отражать реальный промпт, включая пробелы.
+// Границы защищают event loop от гигантских JSON-тел (200 × 100k символов).
+export const tokenEstimateMessageSchema = z.object({
+  role: z.enum(['system', 'user', 'assistant']),
+  content: z.string().max(100_000, 'Сообщение — до 100000 символов'),
+});
+export type TokenEstimateMessageInput = z.infer<typeof tokenEstimateMessageSchema>;
+
+export const tokenEstimateSchema = z.object({
+  messages: z.array(tokenEstimateMessageSchema).max(200, 'Сообщений — не больше 200'),
+  budget: z
+    .number()
+    .int('Бюджет должен быть целым числом')
+    .nonnegative('Бюджет не может быть отрицательным')
+    .optional(),
+});
+export type TokenEstimateInput = z.infer<typeof tokenEstimateSchema>;
