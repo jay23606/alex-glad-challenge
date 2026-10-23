@@ -6,6 +6,24 @@
         "-y",
         "claude-in-mobile"
       ]
+    },
+    "context7": {
+      "command": "npx.cmd",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp"
+      ]
+    },
+    "rea": {
+      "command": "npx.cmd",
+      "args": [
+        "-y",
+        "rea-agents@6.7.0",
+        "mcp"
+      ]
+    },
+    "graphify": {
+      "command": "C:\\Users\\user\\.local\\bin\\graphify-mcp.exe"
     }
   }
 }

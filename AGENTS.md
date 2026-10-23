@@ -1,23 +1,28 @@
-# AGENTS.md — правила проекта (v2, ADVANCED Day 1)
+<!-- From: E:/IT/alex-glad-challenge/AGENTS.md -->
+# AGENTS.md — правила проекта (v3, Agent Skills)
 
 Единый контракт для ИИ-ассистентов, работающих с репозиторием
 `alex-glad-challenge`. Прочитайте до любых изменений. Файл описывает **текущую
 реальность репозитория**, а не историю первых десяти дней.
+
+Этот проект использует workflow-пак [Agent Skills](https://github.com/addyosmani/agent-skills)
+(24 lifecycle-скилла + 4 review-персоны). Проектные факты (стек, структура,
+границы, конвенции, команды валидации) остаются в этом файле; сами процессы
+живут в `.omp/skills/` и `.omp/agents/`.
 
 ## 0. Как читать правила
 
 - **Глобальный конфиг:** `~/.omp/agent/AGENTS.md` — общие правила для всех
   проектов. Он **не отменяет** этот файл; при конфликте побеждает проектный.
 - **Локальный конфиг:** этот `AGENTS.md` — канонический источник правил проекта.
-  `.omp/AGENTS.md` намеренно **не создаётся**: native-провайдер `omp` отдал бы
-  ему приоритет и затенил этот файл.
 - **Sticky-правила:** `.omp/RULES.md` — короткие жёсткие инварианты, которые
   должны оставаться в контексте даже в длинной сессии.
-- **Субагенты:** `.omp/agents/*.md` — `project-implementer`, `project-reviewer`,
-  `product-researcher`, `story-planner`.
-- **Скиллы:** `.omp/skills/*/SKILL.md` — `add-core-service`, `add-web-endpoint`,
-  `project-validation`, `orchestrator-run`, `product-research`, `story-slicing`,
-  `excalidraw-skill`.
+- **Скиллы:** `.omp/skills/*/SKILL.md` — 24 workflow-скилла из Agent Skills.
+- **Персоны агентов:** `.omp/agents/*.md` — `code-reviewer`, `test-engineer`,
+  `security-auditor`, `web-performance-auditor`.
+- **Референсы:** `.omp/references/*.md` — чек-листы: Definition of Done,
+  testing-patterns, security, performance, accessibility, observability,
+  orchestration-patterns.
 - `CLAUDE.md` — исторический документ для другого инструмента. При расхождении
   с этим файлом прав `AGENTS.md`; не дублируйте правила в `CLAUDE.md`.
 
@@ -64,8 +69,10 @@ alex-glad-challenge/
   AGENTS.md                  # этот файл — правила проекта
   .omp/
     RULES.md                 # sticky hard rules
-    agents/                  # project-implementer, project-reviewer
-    skills/                  # add-core-service, add-web-endpoint, project-validation
+    agents/                  # code-reviewer, test-engineer, ...
+    skills/                  # 24 Agent Skills workflow-скилла
+    references/              # shared checklists
+    docs/agents.md           # orchestration/composition guide
   challenge/
     src/
       cli.ts                 # точка входа CLI, диспетчер команд
@@ -371,7 +378,7 @@ return Response.json({ error: safeMessage(safe) }, { status: 502 });
 - Прямой `fetch` к LLM-провайдеру в обход `LlmClient` без причины.
 - `@ts-expect-error` без указания причины и без узкой области.
 
-## 9. Шаблон типичного файла
+## 9. Шаблоны типичного файла
 
 ### 9.1. Core-сервис
 
@@ -495,7 +502,7 @@ describe('POST /api/example', () => {
 
 Мокайте только внешние зависимости (LLM, сеть, БД) и тяжёлые границы. Если
 импорт route тянет весь баррель `web/lib/server/challenge`, замокайте баррель
-до одного нужного экспорта — это мок границы, а не модуля под тестом. Сам
+do одного нужного экспорта — это мок границы, а не модуля под тестом. Сам
 route не мокайте.
 
 ## 10. Валидация (Definition of Done)
@@ -520,27 +527,78 @@ pnpm --filter web build              # если меняли web-сборку/г
 - **Diff:** только файлы задачи; никаких случайных переименований/комментариев.
 - **Секреты:** `grep` по diff на ключи, `Bearer`, `TG_SESSION`, `sk-`.
 
-## 11. Как пользоваться субагентами и скиллами
+Полный project-wide Definition of Done и пояснение, чем он отличается от
+acceptance criteria задачи, см. в `.omp/references/definition-of-done.md`.
 
-Для задач уровня «ресерч → эпик → N сторий → реализация» используйте скилл
-`orchestrator-run`: main agent ведёт флоу через субагентов, состояние —
-в `docs/orchestrator/state.json`, схема — `docs/orchestrator/flow.excalidraw`.
+## 11. Как пользоваться скиллами
 
-1. Определите слой: `challenge/src/core` → скилл `add-core-service`;
-   `web/app/api` → скилл `add-web-endpoint`.
-2. Прочитайте `SKILL.md` и соответствующий существующий файл-образец.
-3. Для реализации запускайте субагента `project-implementer` с одним
-   самодостаточным срезом. В `context` передайте интерфейсы и запрет на
-   build/lint/test внутри среза.
-4. Для ревью — `project-reviewer` (read-only): корректность, границы,
-   секреты, стиль, тесты.
-5. Валидацию (`typecheck`, тесты, smoke) запускает **родитель один раз** после
-   интеграции, не каждый субагент.
+Скиллы — это workflow, не советы. Когда задача попадает под один из них,
+следуйте шагам в `.omp/skills/<name>/SKILL.md` в указанном порядке, не
+пропускайте verification.
 
-Субагент не должен: создавать новый пакет, менять `AGENTS.md`/`.omp/RULES.md`,
-делать commit/push, трогать замороженные демо, добавлять зависимости.
+```text
+DEFINE                      PLAN                         BUILD
+interview-me            planning-and-task-breakdown    incremental-implementation
+idea-refine                                            test-driven-development
+spec-driven-development                                context-engineering
+constraint-driven-development                          source-driven-development
+                                                       doubt-driven-development
+                                                       frontend-ui-engineering
+                                                       api-and-interface-design
 
-## 12. Git-дисциплина
+VERIFY                      REVIEW                       SHIP
+browser-testing-with-devtools   code-review-and-quality      git-workflow-and-versioning
+debugging-and-error-recovery    code-simplification          ci-cd-and-automation
+                                security-and-hardening       deprecation-and-migration
+                                performance-optimization     documentation-and-adrs
+                                                             observability-and-instrumentation
+                                                             shipping-and-launch
+```
+
+Полный список:
+
+| Фаза | Скилл | Зачем |
+|---|---|---|
+| Define | `interview-me` | Вытащить, чего пользователь на самом деле хочет |
+| Define | `idea-refine` | Структурировать размытые идеи |
+| Define | `spec-driven-development` | Спека до кода |
+| Define | `constraint-driven-development` | Зафиксировать планку качества |
+| Plan | `planning-and-task-breakdown` | Разбить на маленькие проверяемые задачи |
+| Build | `incremental-implementation` | Тонкие вертикальные срезы |
+| Build | `test-driven-development` | Red-Green-Refactor |
+| Build | `context-engineering` | Правильный контекст в нужный момент |
+| Build | `source-driven-development` | Решения по официальной документации |
+| Build | `doubt-driven-development` | Адверсариальная проверка решений |
+| Build | `frontend-ui-engineering` | UI, доступность, адаптивность |
+| Build | `api-and-interface-design` | Контракты и границы |
+| Verify | `browser-testing-with-devtools` | Runtime-данные из браузера |
+| Verify | `debugging-and-error-recovery` | Пять шагов: reproduce → localize → reduce → fix → guard |
+| Review | `code-review-and-quality` | Пятиосевое ревью |
+| Review | `code-simplification` | Упростить, сохранив поведение |
+| Review | `security-and-hardening` | OWASP, валидация, секреты |
+| Review | `performance-optimization` | Сначала замер, потом оптимизация |
+| Ship | `git-workflow-and-versioning` | Атомарные коммиты, чистая история |
+| Ship | `ci-cd-and-automation` | Пайплайны качества |
+| Ship | `deprecation-and-migration` | Безопасный вывод старых систем |
+| Ship | `documentation-and-adrs` | Записать почему, а не только что |
+| Ship | `observability-and-instrumentation` | Логи, метрики, трейсы |
+| Ship | `shipping-and-launch` | Чек-лист запуска, мониторинг, откат |
+
+Составление персон: см. `.omp/docs/agents.md`.
+
+## 12. Персоны агентов
+
+Специалисты для целевых ревью. Персона не вызывает другую персону;
+оркестрация — задача пользователя или slash-команды (см. `.omp/docs/agents.md`).
+
+| Персона | Роль | Когда использовать |
+|---|---|---|
+| `code-reviewer` | Senior Staff Engineer | Пятиосевое ревью перед мержем |
+| `test-engineer` | QA Specialist | Стратегия тестирования, coverage, Prove-It |
+| `security-auditor` | Security Engineer | OWASP-аудит, уязвимости |
+| `web-performance-auditor` | Web Performance Engineer | Core Web Vitals, perf-аудит |
+
+## 13. Git-дисциплина
 
 - Ветка на задачу: `day-NN` или `feat/<slug>`; PR в `main`, squash-merge.
 - Коммит: `<scope>: <imperative>` (`day-11: add ...`, `web: fix ...`).
