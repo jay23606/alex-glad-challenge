@@ -7,6 +7,10 @@ import { Button } from '../components/ui/Button';
 import { SectionHead } from '../components/ui/SectionHead';
 import { INPUT_CLASS } from '../components/ui/Field';
 
+// Форма «Обращение»: INPUT_CLASS не задаёт блочность/ширину, добавляем локально
+// (глобально менять INPUT_CLASS нельзя — затронет другие страницы).
+const TICKET_FIELD_CLASS = `block w-full ${INPUT_CLASS}`;
+
 interface FaqResult {
   question: string;
   answer: string;
@@ -73,9 +77,9 @@ export default function SupportPage() {
 
       <Card label="Обращение">
         <div className="space-y-2">
-          <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Тема" className={INPUT_CLASS} />
-          <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Опишите проблему" className={`h-24 ${INPUT_CLASS}`} />
-          <input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Контакт (email/telegram, необязательно)" className={INPUT_CLASS} />
+          <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Тема" className={TICKET_FIELD_CLASS} />
+          <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Опишите проблему" className={`h-24 ${TICKET_FIELD_CLASS}`} />
+          <input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Контакт (email/telegram, необязательно)" className={TICKET_FIELD_CLASS} />
           <Button variant="primary" onClick={submit}>Отправить</Button>
           {status ? <p className="text-sm text-dim">{status}</p> : null}
         </div>
