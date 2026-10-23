@@ -35,6 +35,7 @@ const PUBLIC_PATHS = new Set([
   '/api/demo/rag',
   '/api/style/rewrite',
   '/api/blog/pipeline',
+  '/api/health',
   '/api/auth/login',
   '/api/auth/logout',
   // Metadata-роуты (sitemap/robots/opengraph-image) публичны:
