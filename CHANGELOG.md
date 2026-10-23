@@ -1044,3 +1044,50 @@ DeepSeek; если за 2 минуты нет ответа — капсит и �
 **Код/артефакты:**
 - `AGENTS.md` §13–14, `CLAUDE.md` (указатель)
 - `docs/advanced-day-02/{README,research-run-01,graph-run-01}.md`
+
+---
+
+## ADVANCED Days 3–5 — Testing / Local Boost / Execution Loop
+**Дата:** 2026-10-23
+
+**День 3 (Testing):** два уровня. Ур.1 — тесты на 3 непокрытых модуля
+(`core/rag/quotes.ts` +6, `core/rag/chunker.ts` +9, `web shared/it-facts` +3);
+challenge 153/153, web 238/238. Ур.2 — 5 smoke-сценариев через браузер-MCP
+(логин, гостевой гейт, CRUD задачи, блог+фильтр, логаут) со скриншотами на
+каждом шаге (`docs/advanced-day-03/shots/`); находки: двойная cookie-ловушка
+127.0.0.1 vs localhost, дев-овлея Next поверх футера, неочевидный /mcp/todos.
+Усиление: flow «после PR = typecheck x2 + suite x2 + smoke = единый отчёт» +
+отрепетирован сценарий «задеплоил фичу → обнови smoke» (S6, guide-блок).
+
+**День 4 (Local Boost):** Ollama + Continue.dev. Модели под железо (12 ядер,
+16GB): `qwen2.5-coder:7b` чат (41.8 tok/s короткая генерация) +
+`qwen2.5-coder:1.5b-base` FIM-автокомплит (76.8 tok/s). Правила AGENTS.md —
+выжимкой в системный промпт; контекст и параметры в
+`docs/advanced-day-04/continue-config.yaml` (num_ctx явный). Те же задачи,
+что облачный: фича (промпт Дня 1) — код непригоден (8 нарушений правил);
+Research — форма без глубины; точечный SQL-фикс — корректен за 10.5 с.
+Таблица и рекомендация «где хватает локальной» — в отчёте.
+
+**День 5 (Execution Loop):** пул 21 issue в GitHub (#15–#37, labels
+day-3/4/5 × bug/test/feature/docs/chore). Два прогона без единой паузы:
+Прогон 1 — 6 задач (Дни 3–4), Прогон 2 — 17 задач (пул). С первого раза
+83% → 93%; финальная валидация challenge 167/167, web 254/254. Итоги пула:
+разорван цикл core/index↔agents; 3 роута возвращены за chokepoint; TG-env
+читается только через accessors env.ts; requireAuth добавлен на
+/api/rag/index; /api/health (публичный) + rewrite /todos; 27 новых тестов;
+доки (AUTHORIZATION, профили в README, шаблон профиля §13.8); #28 закрыт как
+неактуальный, #37 — не-баг (дев-овлея Next).
+
+**Риски/ограничения:** перебор локальных моделей ограничен 16GB RAM;
+vitest на этом хосте — только с --maxWorkers=2 (AGENTS §10); 3 итерации в
+пуле — тест-авторинг, продуктового кода не касались.
+
+**Код/артефакты:**
+- `docs/advanced-day-03/**` (отчёт + скриншоты), `docs/advanced-day-04/**`
+  (конфиг, rules, сырые прогоны, таблица), `docs/advanced-day-05/README.md`
+- `challenge/src/core/{env.ts,agents/telegram*.ts,agents/*(imports)}`,
+  `challenge/src/core/{sanitize,strategy,quotes,chunker}.test.ts`
+- `web/app/api/rag/index/route.ts`, `web/app/api/health/route.ts`,
+  `web/middleware.ts`, `web/next.config.ts`
+- `web/test/unit/{it-facts,rag-index-route,health-route,session,forms}.spec.ts`
+- GitHub Issues #15–#37 (все закрыты)
