@@ -14,6 +14,11 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // Короткий URL /todos → реальный маршрут /mcp/todos (issue #36): наивный путь
+  // из названия карточки не должен давать 404.
+  async rewrites() {
+    return [{ source: '/todos', destination: '/mcp/todos' }];
+  },
   // Отключаем origin-compression (gzip/brotli): default compress:true в prod
   // (next start/standalone) буферизует SSE-ответы (/api/joke/session, /api/chat/*) —
   // токены идут батчами вместо token-by-token. Дополняет SSE-Headers 'X-Accel-Buffering':'no'
