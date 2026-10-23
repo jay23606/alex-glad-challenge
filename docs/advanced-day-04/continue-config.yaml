@@ -1,0 +1,63 @@
+# Continue.dev — конфиг локального код-ассистента (ADVANCED Day 4)
+# Каноническая копия в репо. Живая установка: скопировать в ~/.continue/config.yaml
+#   cp docs/advanced-day-04/continue-config.yaml ~/.continue/config.yaml
+# Требования: Ollama на 127.0.0.1:11434; модели qwen2.5-coder:7b (чат) и
+# qwen2.5-coder:1.5b-base (FIM-автокомплит).
+
+name: Alex-Glad Challenge Local Assistant
+version: 1.0.0
+schema: v1
+
+models:
+  # Чат / edit / apply — 7b инструкт под 16GB RAM (Q4, ~4.7GB).
+  - name: qwen2.5-coder-7b-chat
+    provider: ollama
+    model: qwen2.5-coder:7b
+    apiBase: http://127.0.0.1:11434
+    roles:
+      - chat
+      - edit
+      - apply
+    defaultCompletionOptions:
+      # Код: низкая temperature и суженный top_p — меньше галлюцинаций в API.
+      temperature: 0.1
+      topP: 0.9
+      # ЯВНЫЙ num_ctx: Ollama молча режет хвост длинного промпта (известная
+      # ГОТЧА репозитория). 16k — комфортно для 7b Q4 на 16GB RAM.
+      contextLength: 16384
+
+  # Автокомплит — малая BASE-модель с FIM-токенами: латентность важнее глубины.
+  - name: qwen2.5-coder-1.5b-base-autocomplete
+    provider: ollama
+    model: qwen2.5-coder:1.5b-base
+    apiBase: http://127.0.0.1:11434
+    roles:
+      - autocomplete
+    defaultCompletionOptions:
+      temperature: 0.05
+      topP: 0.9
+      # Автокомплит на коротком окне — быстрее и без лишнего шума.
+      contextLength: 4096
+
+# Правила проекта — в системный промпт чата/edit (см. rules-agents-short.md).
+rules:
+  - docs/advanced-day-04/rules-agents-short.md
+
+# Контекст, который модель видит к запросу:
+context:
+  # Текущий файл + соседние по импортам (стандартный provider code).
+  - provider: code
+  # Правила и конфиги проекта всегда в контексте.
+  - provider: file
+    options:
+      path: AGENTS.md
+  - provider: file
+    options:
+      path: .omp/RULES.md
+  # Структура core — куда чаще всего нужно заглядывать.
+  - provider: codebase
+    options:
+      nRetrieve: 25
+      nFinal: 8
+# Не подключаем: docs/ (RSS-обучающие корпуса), terminal, localhost-провайдеры —
+# меньше шума для 7b, меньше расхода контекста.
