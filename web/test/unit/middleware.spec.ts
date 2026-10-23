@@ -6,18 +6,19 @@
 // route-спеков); auth-математика реальная (HMAC на тестовых env), моков нет.
 import { beforeAll, describe, expect, it } from 'vitest';
 import { NextRequest } from 'next/server';
-import type { NextResponse } from 'next/server';
+import type { MiddlewareConfig, NextResponse } from 'next/server';
 
 process.env.WEB_AUTH_SECRET = 'test-secret-for-vitest';
 process.env.WEB_ADMIN_PASSWORD = 'test-password';
 
 let middleware: (request: NextRequest) => NextResponse;
+let config: MiddlewareConfig;
 let createSessionValue: () => string;
 
 beforeAll(async () => {
   // Динамический импорт осознанный: lib/auth читает env на загрузке модуля
   // (loadEnvUpward) — env-строки выше обязаны выполниться раньше импорта.
-  ({ middleware } = await import('../../middleware'));
+  ({ middleware, config } = await import('../../middleware'));
   ({ createSessionValue } = await import('../../lib/auth'));
 });
 
@@ -81,5 +82,93 @@ describe('middleware: auth-гейт (контраст к bypass)', () => {
     expect(middleware(req('/dashboard?tab=alerts')).headers.get('location')).toBe(
       'http://localhost:3000/login?next=%2Fdashboard',
     );
+  });
+});
+
+// --- config.matcher: регистрация путей ---
+
+// middleware() выше проверяет поведение, но не то, на КАКИХ путях Next его вообще
+// запускает: за это отвечает config.matcher[].source. Дрейф matcher (например,
+// удалили favicon.ico из lookahead или /api/:path* → /api) уводит пути мимо
+// auth-гейта/CSP, не трогая сам middleware(). Здесь матчим pathname тем же
+// способом, что и Next: source компилируется path-to-regexp (getMiddlewareMatchers
+// → tryToParsePath → next/dist/compiled/path-to-regexp), матч —
+// new RegExp(regexpStr).exec(pathname) без query, анкерный, регистрозависимый
+// (shared/lib/router/utils/middleware-route-matcher.js). Условия has/missing
+// (prefetch-хедеры) проверяются рантаймом Next поверх регекспы — вне юнит-скоупа.
+// Мини-компилятор без новых зависимостей покрывает ровно синтаксис matcher'а:
+// литеральные сегменты, «(…)» как сырой regex, «:path*» → повторяемый сегмент.
+function compileSource(source: string): RegExp {
+  const segment = '[^\\/#\\?]+?'; // паттерн сегмента path-to-regexp: без /, #, ?
+  let re = '^';
+  let i = 0;
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === '(') {
+      // Сырой regex-фрагмент (negative lookahead) — в non-capturing группу как есть.
+      let depth = 0;
+      let j = i;
+      for (; j < source.length; j += 1) {
+        if (source[j] === '(') depth += 1;
+        else if (source[j] === ')') {
+          depth -= 1;
+          if (depth === 0) break;
+        }
+      }
+      re += `(?:${source.slice(i + 1, j)})`;
+      i = j + 1;
+    } else if (ch === ':' && /^\w+/.test(source.slice(i + 1))) {
+      // Именованный параметр; ведущий '/' из source — его префикс в path-to-regexp:
+      // съедаем его, чтобы он не остался литералом перед группой (иначе двойной слэш).
+      if (re.endsWith('/')) re = re.slice(0, -1);
+      const name = /^\w+/.exec(source.slice(i + 1))![0];
+      let end = i + 1 + name.length;
+      const modifier = source[end] === '*' || source[end] === '+' ? source[end] : '';
+      if (modifier) end += 1;
+      if (modifier === '*') {
+        re += `(?:/${segment}(?:/${segment})*)?`;
+      } else if (modifier === '+') {
+        re += `(?:/${segment}(?:/${segment})*)`;
+      } else {
+        re += `/${segment}`;
+      }
+      i = end;
+    } else {
+      re += /[.*+?^${}()|[\]\\]/.test(ch) ? `\\${ch}` : ch;
+      i += 1;
+    }
+  }
+  // path-to-regexp анкорит результат (^…$) и добавляет опциональный трейлинг-делимитер.
+  return new RegExp(`${re}[\\/#\\?]?$`);
+}
+
+function matchesMiddleware(pathname: string): boolean {
+  const matcher = config.matcher;
+  const entries = typeof matcher === 'string' ? [matcher] : (matcher ?? []);
+  return entries.some((entry) =>
+    compileSource(typeof entry === 'string' ? entry : entry.source).test(pathname),
+  );
+}
+
+describe('middleware: config.matcher — source-паттерны матчат регистрацию путей', () => {
+  it('страницы матчятся: /dashboard, /login, / (иначе нет auth-гейта и CSP-nonce)', () => {
+    expect(matchesMiddleware('/dashboard')).toBe(true);
+    expect(matchesMiddleware('/login')).toBe(true);
+    expect(matchesMiddleware('/')).toBe(true);
+    // Матч — по pathname без query: Next прогоняет matcher на nextUrl.pathname.
+    expect(matchesMiddleware(new URL('http://localhost:3000/dashboard?tab=alerts').pathname)).toBe(
+      true,
+    );
+  });
+
+  it('/api/* матчится вторым source (/api/:path*), включая вложенные сегменты', () => {
+    expect(matchesMiddleware('/api/notifications')).toBe(true);
+    expect(matchesMiddleware('/api/integrations/inbound/7')).toBe(true);
+  });
+
+  it('статика и favicon НЕ матчятся (исключения lookahead), иначе 302 на /login у чанков', () => {
+    expect(matchesMiddleware('/_next/static/chunk.js')).toBe(false);
+    expect(matchesMiddleware('/_next/image')).toBe(false);
+    expect(matchesMiddleware('/favicon.ico')).toBe(false);
   });
 });
