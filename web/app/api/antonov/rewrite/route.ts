@@ -15,10 +15,9 @@
 import 'server-only';
 import { NextRequest, NextResponse } from 'next/server';
 
-import { msg } from '@challenge/core/types';
 
 import { antonovRewriteSchema } from '../../../../lib/shared/forms';
-import { clean } from '../../../../lib/server/challenge';
+import { clean, msg } from '../../../../lib/server/challenge';
 import { pickLlmClient } from '../../../../lib/server/llm';
 import { getKeysStatus } from '../../../../lib/server/env';
 import { safeMessage } from '../../../../lib/server/safe-message';
