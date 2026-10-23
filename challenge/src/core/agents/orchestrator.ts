@@ -2,8 +2,8 @@
 // через LLM выбирает финальный топ-3 самых горячих тем.
 // Знает запрос пользователя (что ищем), но каждый агент видит только свой скоуп.
 
-import type { LlmClient } from '../index.js';
-import { msg } from '../index.js';
+import type { LlmClient } from '../client.js';
+import { msg } from '../types.js';
 import type { SourceAgentResult, TrendingTopic } from './sourceAgent.js';
 
 export interface OrchestratorResult {

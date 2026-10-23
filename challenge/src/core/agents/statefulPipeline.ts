@@ -15,7 +15,7 @@
 //   /pipeline publish      — опубликовать готовый пост в Telegram
 
 import { BlogDb, type NewsRow } from '../db.js';
-import { LlmClient } from '../index.js';
+import type { LlmClient } from '../client.js';
 import type { ProfileManager } from '../profile.js';
 import { fetchAllFeeds, filterRecent, toNewsRow } from './rss.js';
 import { NewsFetcher } from './newsFetcher.js';

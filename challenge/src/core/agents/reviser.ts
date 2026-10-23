@@ -6,7 +6,7 @@
 // Переписанный пост отправляется обратно на фактчекинг.
 
 import type { NewsRow } from '../db.js';
-import type { LlmClient } from '../index.js';
+import type { LlmClient } from '../client.js';
 import type { ProfileManager } from '../profile.js';
 import type { FactCheckResult } from './factChecker.js';
 import { rewritePost } from './postWriter.js';

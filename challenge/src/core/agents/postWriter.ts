@@ -7,7 +7,8 @@
 //   4. Длина жёстко контролируется: 100-500 символов, иначе LLM растягивает.
 
 import type { BlogDb, NewsRow, StyleSampleRow } from '../db.js';
-import { LlmClient, msg } from '../index.js';
+import type { LlmClient } from '../client.js';
+import { msg } from '../types.js';
 import type { ProfileManager } from '../profile.js';
 
 export interface WrittenPost {
@@ -131,7 +132,7 @@ function formatSamples(rows: StyleSampleRow[]): string {
 }
 
 export async function rewritePost(
-  client: import('../index.js').LlmClient,
+  client: LlmClient,
   originalPost: string,
   edit: string,
   news: NewsRow,

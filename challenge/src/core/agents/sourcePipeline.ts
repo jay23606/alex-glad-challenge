@@ -4,7 +4,7 @@
 // Оркестратор ждёт всех, выбирает финальный топ-3.
 
 import type { BlogDb } from '../db.js';
-import type { LlmClient } from '../index.js';
+import type { LlmClient } from '../client.js';
 import { DATA_DIR } from '../paths.js';
 import type { SourceAgent } from './sourceAgent.js';
 import { RssSourceAgent } from './rssSource.js';

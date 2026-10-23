@@ -10,7 +10,8 @@
 // prompt vs один мах).
 
 import type { NewsRow } from '../db.js';
-import { LlmClient, msg } from '../index.js';
+import type { LlmClient } from '../client.js';
+import { msg } from '../types.js';
 
 export interface FactCheckIssue {
   claim: string;       // что утверждается в посте

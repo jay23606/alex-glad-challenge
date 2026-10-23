@@ -4,7 +4,8 @@
 // и возвращает их с коротким резюме почему каждая важна.
 
 import type { BlogDb, NewsRow } from '../db.js';
-import { LlmClient, msg } from '../index.js';
+import type { LlmClient } from '../client.js';
+import { msg } from '../types.js';
 
 export interface RankedNews {
   news: NewsRow;

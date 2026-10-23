@@ -6,7 +6,7 @@
 // без штампа) для REPL/CLI-демо.
 
 import { BlogDb, type BlogRow } from '../db.js';
-import { LlmClient } from '../index.js';
+import type { LlmClient } from '../client.js';
 import type { ProfileManager } from '../profile.js';
 import { fetchAllFeedsDetailed, filterRecent, toNewsRow, feedsFromUrls } from './rss.js';
 import { NewsFetcher, type NewsFetchResult } from './newsFetcher.js';
