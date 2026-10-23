@@ -142,8 +142,10 @@
 
 - **Локальный dev + production build/deploy — оба режима разрешены:**
   - **Dev:** `next dev -H 127.0.0.1` (loopback).
-  - **Production build:** `pnpm --filter web build` с `output: 'standalone'` в `next.config.ts`
-    (артефакты в `web/.next/standalone/` — внутри `web/.next/`, уже в `.gitignore`).
+  - **Production build:** `pnpm --filter web build`; `output: 'standalone'` в `next.config.ts`
+    включён вне win32 всегда, на win32 — только с `NEXT_STANDALONE=1` (иначе build на Windows
+    падает EPERM на symlink-трейсинге, issue #51; обычного build достаточно для `next start`).
+    Артефакты standalone — в `web/.next/standalone/` (внутри `web/.next/`, уже в `.gitignore`).
   - **Smoke-доступ на сервере:** standalone-сервер / `next start` на loopback (`127.0.0.1`),
     публичный доступ — ТОЛЬКО через SSH-туннель. Деплой на сервер допускается.
   - **Публичный доступ (когда потребуется) — ОБЯЗАТЕЛЬНЫЙ харденинг** (отдельная задача):
