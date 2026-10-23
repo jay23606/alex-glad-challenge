@@ -974,3 +974,42 @@ DeepSeek; если за 2 минуты нет ответа — капсит и �
 - Эвристика bytes/4 не токенизатор модели: на кириллице/эмодзи оценка
   приблизительная, для бюджета контекста нужен запас.
 - Новых пакетов нет; сервис чистый (без сети/БД/`process.env`).
+
+---
+
+## Feature: Blogs Foundation — мульти-блог и in-app guide
+**Дата:** 2026-09-30 (feature), 2026-10-22 (guide)
+
+**Что сделано:**
+- Мульти-блог-основа: три seeded-блога («Иди на факты глянь», «Артемия Артель»,
+  «Невский храм на Доваторцев») + `blog_id` в новостях/постах/образцах стиля.
+- `GET /api/blogs` — список блогов с производными флагами (`hasProfile`,
+  `sourcesCount`, `tgChatIdSet`).
+- `PATCH /api/blogs/[slug]` — настройка блога: имя, профиль голоса, TG-чат,
+  RSS-источники (пустой массив → дефолтные фиды).
+- Блог учитывается в `/blog/news`, `/blog/digest`, `/blog/posts` (фильтр),
+  `/blog/style` и блог-pipeline: выбирает RSS-источники, профиль голоса и
+  штампует `blog_id`.
+- Guide на `/blog/posts`: короткий блок «как пользоваться · 4 шага» — выбрать
+  блог, создать черновик, проверить/отредактировать, опубликовать в Telegram;
+  сноска про `PATCH /api/blogs/<slug>` и профиль голоса в `/chat`.
+
+**Как пользоваться (кратко):**
+1. Выбрать блог на `/blog/news` / `/blog/pipeline` / `/blog/digest` или
+   фильтром на `/blog/posts`.
+2. Создать черновик через pipeline/news.
+3. Открыть пост, проверить и отредактировать.
+4. Опубликовать в Telegram из карточки поста.
+5. Новый блог: задать RSS и профиль голоса через `PATCH /api/blogs/<slug>`;
+   профиль создаётся в `/chat` (`/profile`). Без профиля и источников
+   генерация недоступна.
+
+**Тесты:**
+- `web/test/unit/blog-multiblog.spec.ts` — мульти-блог-контракты.
+- Ручной smoke: `/blog/posts` 200, блок guide присутствует.
+
+**Код:**
+- `challenge/src/core/db.ts`, `core/agents/*`, `web/lib/server/blogs.ts`,
+  `web/app/api/blogs/**`, `web/app/api/blog/**`, `web/app/blog/**`,
+  `web/app/dashboard/page.tsx`, `web/lib/shared/forms.ts`,
+  `web/lib/server/challenge.ts`, `web/scripts/auto-drafts.ts`.
