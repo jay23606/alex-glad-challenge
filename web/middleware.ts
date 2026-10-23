@@ -10,7 +10,8 @@
 // runtime = nodejs: standalone-стек на Node, Buffer доступен, нет риска edge-API-гэпов.
 //
 // Day 36 — admin-auth гейт ПОСЛЕ nonce-кода (nonce-логика не тронута: прошлый инцидент
-// «пустой body»). Публичные пути: /, /login, /harness, /jira (+его API). Остальное:
+// «пустой body»). Публичные пути — только точный allowlist PUBLIC_PATHS ниже, он
+// единственный источник истины (не дублировать список в комментарии). Остальное:
 // страницы → 302 /login?next=<pathname> (query выкидывается), /api/* → 401 JSON
 // (клиентские страницы ждут JSON, не HTML-redirect). 401/302 строятся напрямую,
 // без nonce — это не HTML, CSP им не нужен. Fail-closed: env не задан → сессий
