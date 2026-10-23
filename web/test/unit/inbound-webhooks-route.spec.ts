@@ -118,6 +118,42 @@ function signedReq(hook: typeof HOOK_NOTIFICATION, body: unknown): ReturnType<ty
   return eventReq(hook.id, raw, signPayload(hook.secret, raw));
 }
 
+// Запрос с телом-стримом (pull-продюсер): по одному чанку 40 KiB на pull,
+// 3 чанка = 120 KiB, каждый ≤ MAX — срабатывает только кумулятивный счётчик.
+// cancelled() = дошла ли отмена чтения до продюсера; pulls() = сколько чанков
+// вытянуто (чтобы отличить «чтение остановлено капом» от «стрим вычитан весь»).
+function streamedReq(hookId: number): {
+  req: NextRequest;
+  ctx: { params: Promise<{ id: string }> };
+  pulls: () => number;
+  cancelled: () => boolean;
+} {
+  let pulls = 0;
+  let cancelled = false;
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      pulls += 1;
+      if (pulls <= 3) controller.enqueue(encoder.encode('y'.repeat(40 * 1024)));
+      else controller.close();
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  return {
+    req: new NextRequest(`http://127.0.0.1:3000/api/integrations/inbound/${hookId}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+      duplex: 'half',
+    }),
+    ctx: { params: Promise.resolve({ id: String(hookId) }) },
+    pulls: () => pulls,
+    cancelled: () => cancelled,
+  };
+}
+
 describe('POST /api/integrations/inbound/[id] (приём события, HMAC вместо сессии)', () => {
   it('200 без cookie при валидной подписи: target=notification → NotificationService.notify', async () => {
     mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
@@ -184,6 +220,74 @@ describe('POST /api/integrations/inbound/[id] (приём события, HMAC �
     const tampered = eventReq(HOOK_NOTIFICATION.id, JSON.stringify({ title: 'forged' }), sig);
     const res = await POST_RECEIVE(tampered.req, tampered.ctx);
     expect(res.status).toBe(401);
+  });
+});
+
+describe('POST [id]: лимит размера тела — 413 до HMAC (issue #96, cap 64 KiB)', () => {
+  // Дублирует MAX_BODY_BYTES роута намеренно: лимит зафиксирован тестом.
+  const OVER = 64 * 1024 + 1;
+
+  it('oversized с Content-Length → 413 до чтения тела, событие не создаётся, rate-счётчик не двигается', async () => {
+    const { req, ctx } = eventReq(HOOK_NOTIFICATION.id, '{}', null);
+    // undici сам не выставляет content-length — реальный клиент присылает его,
+    // выставляем явно: заголовок заявляет oversized, тело меньше (гейт смотрит
+    // только на заголовок и отказывает до чтения потока).
+    req.headers.set('content-length', String(OVER));
+    const res = await POST_RECEIVE(req, ctx);
+    expect(res.status).toBe(413);
+    await expect(res.json()).resolves.toMatchObject({ error: expect.stringContaining('large') });
+    expect(mocks.getHook).not.toHaveBeenCalled(); // отказ до обращения к БД
+    expect(mocks.notificationAdd).not.toHaveBeenCalled();
+    expect(mocks.todoAdd).not.toHaveBeenCalled();
+    expect(failState().fails).toBe(0); // 413 — не перебор подписи, счётчик неудач не растёт
+  });
+
+  it('oversized без Content-Length (стрим) → чтение обрывается капом → 413, событие не создаётся', async () => {
+    mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
+    const { req, ctx } = eventReq(HOOK_NOTIFICATION.id, 'x'.repeat(OVER), 'deadbeef');
+    // Явно убираем заголовок — не полагаемся на то, что undici его не ставит.
+    req.headers.delete('content-length');
+    expect(req.headers.get('content-length')).toBeNull(); // → запрос идёт по пути стрима (аналог chunked)
+    const res = await POST_RECEIVE(req, ctx);
+    expect(res.status).toBe(413);
+    await expect(res.json()).resolves.toMatchObject({ error: expect.stringContaining('large') });
+    expect(mocks.notificationAdd).not.toHaveBeenCalled();
+    expect(mocks.todoAdd).not.toHaveBeenCalled();
+    expect(failState().fails).toBe(0);
+  });
+
+  it('тело ровно 64 KiB проходит гейт → 401 по подписи (а не 413)', async () => {
+    mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
+    const raw = 'x'.repeat(64 * 1024);
+    const { req, ctx } = eventReq(HOOK_NOTIFICATION.id, raw, 'deadbeef');
+    const res = await POST_RECEIVE(req, ctx);
+    expect(res.status).toBe(401); // гейт пропустил, отвергла подпись
+    expect(failState().fails).toBe(1);
+  });
+
+  it('multi-chunk oversized: чанки по 40 KiB (каждый ≤ MAX) → 413, cancel доходит до продюсера', async () => {
+    mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
+    // Каждый чанк ≤ MAX: срабатывает только кумулятивный счётчик — при мутации
+    // «счётчик не кумулятивный» (bytes = value.byteLength) лимит не сработал бы
+    // ни на одном чанке и тест упал бы (401 вместо 413). Продюсер pull-based:
+    // у стрима без close() cancel источника вызывается гарантированно.
+    const { req, ctx, pulls, cancelled } = streamedReq(HOOK_NOTIFICATION.id);
+    const res = await POST_RECEIVE(req, ctx);
+    expect(res.status).toBe(413);
+    expect(cancelled()).toBe(true); // чтение прекратилось: reader.cancel дошёл до продюсера
+    expect(pulls()).toBeLessThan(4); // вытянуто ≤ 2-3 чанков: стрим не вычитан до конца
+    expect(mocks.notificationAdd).not.toHaveBeenCalled();
+    expect(mocks.todoAdd).not.toHaveBeenCalled();
+    expect(failState().fails).toBe(0);
+  });
+
+  it('Content-Length ровно MAX проходит precheck → 401 по подписи (а не 413)', async () => {
+    mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
+    const { req, ctx } = eventReq(HOOK_NOTIFICATION.id, '{}', 'deadbeef');
+    req.headers.set('content-length', String(64 * 1024)); // == MAX: граница precheck не отклоняет
+    const res = await POST_RECEIVE(req, ctx);
+    expect(res.status).toBe(401); // при мутации «>=» precheck дал бы 413
+    expect(failState().fails).toBe(1);
   });
 });
 

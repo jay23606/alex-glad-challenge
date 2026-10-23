@@ -32,6 +32,13 @@ export const dynamic = 'force-dynamic';
 const RATE_LIMIT = 30; // неудачных попыток до блокировки
 const RATE_WINDOW_MS = 5 * 60 * 1000; // окно 5 минут
 
+// Лимит размера тела POST до проверки подписи (issue #96). Тело нужно целиком
+// (HMAC считается по raw body), т.е. оно читается до аутентификации — без капа
+// запрос с огромным/бесконечным (chunked) телом вынуждает сервер буферизовать
+// его в памяти: pre-auth memory DoS. 64 KiB с запасом покрывают легитимные
+// события {title, body} и отсекают всё крупное до/во время чтения.
+const MAX_BODY_BYTES = 64 * 1024;
+
 // Модульное состояние окна (globalThis — переживает HMR dev-сервера).
 const g = globalThis as unknown as { __inboundHookFails?: { fails: number; resetAt: number } };
 const state = (g.__inboundHookFails ??= { fails: 0, resetAt: 0 });
@@ -43,6 +50,30 @@ function registerFail(): void {
     state.resetAt = now + RATE_WINDOW_MS;
   }
   state.fails += 1;
+}
+
+// Чтение тела с капом; null — лимит превышен. Сначала дешёвый precheck по
+// заголовку Content-Length (отказ до чтения потока), затем поток читается
+// чанками: при превышении лимита чтение прекращается (reader.cancel()) —
+// chunked-запрос без Content-Length не может буферизоваться бесконечно.
+async function readBodyCapped(req: NextRequest): Promise<string | null> {
+  const declared = Number(req.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return null;
+  if (!req.body) return '';
+  const reader = req.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let body = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return body + decoder.decode(); // flush хвоста многобайтовой последовательности
+    bytes += value.byteLength;
+    if (bytes > MAX_BODY_BYTES) {
+      await reader.cancel();
+      return null;
+    }
+    body += decoder.decode(value, { stream: true });
+  }
 }
 
 export async function POST(
@@ -64,8 +95,10 @@ export async function POST(
     return jsonError('invalid id', 400);
   }
 
-  // Сырое тело до JSON.parse — подпись считается по нему.
-  const rawBody = await req.text();
+  // Сырое тело до JSON.parse — подпись считается по нему. Читается с капом:
+  // oversized → 413 до/во время чтения, до проверки подписи (issue #96).
+  const rawBody = await readBodyCapped(req);
+  if (rawBody === null) return jsonError('body too large', 413);
   const signature = req.headers.get('x-artel-signature') ?? '';
 
   const hook = await withDb(() => getInboundHookDb().get(hookId));
