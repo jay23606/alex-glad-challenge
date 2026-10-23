@@ -4,6 +4,8 @@
 // передан явно (мульти-блог: blogs.tg_chat_id).
 // Прокси через HTTPS_PROXY (HTTP/HTTPS прокси, например gost → socks5).
 
+import { getTgBotToken, getTgChatId } from '../env.js';
+
 import { netFetch } from '../net.js';
 
 export interface PublishResult {
@@ -13,11 +15,11 @@ export interface PublishResult {
 }
 
 export function isTelegramConfigured(): boolean {
-  return Boolean(process.env['TG_BOT_TOKEN'] && process.env['TG_CHAT_ID']);
+  return Boolean(getTgBotToken() && getTgChatId());
 }
 
 export async function getBotInfo(): Promise<Record<string, unknown> | null> {
-  const token = process.env['TG_BOT_TOKEN'];
+  const token = getTgBotToken();
   if (!token) return null;
   try {
     const res = await netFetch(`https://api.telegram.org/bot${token}/getMe`, {
@@ -35,8 +37,8 @@ export async function publishPost(
   parseMode: 'HTML' | 'none' = 'HTML',
   chatId?: string,
 ): Promise<PublishResult> {
-  const token = process.env['TG_BOT_TOKEN'];
-  const targetChat = chatId ?? process.env['TG_CHAT_ID'];
+  const token = getTgBotToken();
+  const targetChat = chatId ?? getTgChatId();
 
   if (!token || !targetChat) {
     return { ok: false, error: 'TG_BOT_TOKEN или TG_CHAT_ID не заданы в .env' };

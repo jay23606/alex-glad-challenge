@@ -10,6 +10,7 @@ import { TelegramClient, Api } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 import { computeCheck } from 'telegram/Password.js';
 import type { ProxyInterface } from 'telegram/network/connection/TCPMTProxy.js';
+import { getTgMtprotoConfig, getTgSocksProxy } from '../env.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -31,11 +32,7 @@ function defaultAsk(q: string): Promise<string> {
 // HTTPS_PROXY (для fetch) на него не влияет — нужен отдельный SOCKS.
 // Приоритет: TG_SOCKS_PROXY > SOCKS_PROXY > вывод хоста из HTTPS_PROXY.
 function parseSocksProxy(): ProxyInterface | undefined {
-  const raw =
-    process.env['TG_SOCKS_PROXY'] ||
-    process.env['SOCKS_PROXY'] ||
-    process.env['HTTPS_PROXY'] ||
-    process.env['https_proxy'];
+  const raw = getTgSocksProxy();
   if (!raw) return undefined;
   try {
     const url = new URL(raw);
@@ -144,11 +141,12 @@ export class TelegramScannerAgent implements SourceAgent {
   private async getClient(): Promise<TelegramClient> {
     if (this.client && this.client.connected) return this.client;
 
-    const apiId = Number(process.env['TG_API_ID']);
-    const apiHash = process.env['TG_API_HASH'];
-    if (!apiId || !apiHash) {
+    const mtproto = getTgMtprotoConfig();
+    if (!mtproto) {
       throw new Error('TG_API_ID или TG_API_HASH не заданы в .env');
     }
+    const apiId = mtproto.apiId;
+    const apiHash = mtproto.apiHash;
 
     // Загружаем сохранённую сессию.
     let sessionString = '';

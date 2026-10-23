@@ -195,6 +195,36 @@ export function getTgBotConfig(): { botToken: string; chatId: string } | null {
   return { botToken, chatId };
 }
 
+/** Токен Telegram Bot API без привязки к chatId (chat может приходить параметром — мульти-блог). */
+export function getTgBotToken(): string | null {
+  return process.env.TG_BOT_TOKEN?.trim() || null;
+}
+
+/** chat_id канала по умолчанию. null если не задан. */
+export function getTgChatId(): string | null {
+  return process.env.TG_CHAT_ID?.trim() || null;
+}
+
+/** SOCKS5-прокси для gram.js (MTProto ходит по TCP, HTTPS_PROXY на него не влияет).
+ *  Приоритет: TG_SOCKS_PROXY > SOCKS_PROXY > HTTPS_PROXY > https_proxy. null если ничего не задано. */
+export function getTgSocksProxy(): string | null {
+  return (
+    process.env['TG_SOCKS_PROXY']?.trim() ||
+    process.env['SOCKS_PROXY']?.trim() ||
+    process.env['HTTPS_PROXY']?.trim() ||
+    process.env['https_proxy']?.trim() ||
+    null
+  );
+}
+
+/** MTProto-креды грам.js. null если apiId/apiHash не заданы. */
+export function getTgMtprotoConfig(): { apiId: number; apiHash: string } | null {
+  const apiId = Number(process.env['TG_API_ID']);
+  const apiHash = process.env['TG_API_HASH']?.trim();
+  if (!apiId || !apiHash) return null;
+  return { apiId, apiHash };
+}
+
 /** Опциональный bearer-токен для auth на MCP HTTP-сервере. undefined если не задан. */
 export function getMcpAuth(): string | undefined {
   const token = process.env.MCP_AUTH_TOKEN?.trim();
