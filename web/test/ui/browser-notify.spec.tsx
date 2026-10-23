@@ -135,6 +135,29 @@ describe('useBrowserNotifications', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('opt-in off — poll /api/notifications не отправляется вовсе; enabled=true + granted — отправляется', async () => {
+    vi.useFakeTimers();
+    MockNotification.permission = 'granted';
+    const fetchMock = vi.fn(async () => jsonResponse([]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    // Opt-in off: флага browserNotify:enabled нет в localStorage → useEffect
+    // выходит рано: ни первого poll на монтировании, ни setInterval-тика.
+    const { unmount } = render(<Host intervalMs={1000} />);
+    await flush();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    unmount();
+
+    // enabled=true + granted: первый poll отправляется сразу при монтировании.
+    window.localStorage.setItem('browserNotify:enabled', '1');
+    render(<Host intervalMs={1000} />);
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('enable: granted → enabled + localStorage, denied → остаётся выключенным', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse([])));
     MockNotification.permission = 'granted';
@@ -170,5 +193,53 @@ describe('useBrowserNotifications', () => {
     });
     expect(MockNotification.requestPermission).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // Хост, отдающий наружу сам promise enable(), чтобы проверить, что он
+  // резолвится, а не отклоняется (кнопка в Host делает void bn.enable()).
+  let enablePromise: Promise<void> | null = null;
+  function EnableHost() {
+    const bn = useBrowserNotifications();
+    return (
+      <div>
+        <output data-testid="state">{`${bn.supported}:${bn.permission}:${bn.enabled}`}</output>
+        <button
+          type="button"
+          onClick={() => {
+            enablePromise = bn.enable();
+          }}
+        >
+          enable
+        </button>
+      </div>
+    );
+  }
+
+  function clickEnableAndAwait(): Promise<void> {
+    fireEvent.click(screen.getByRole('button', { name: 'enable' }));
+    const p = enablePromise;
+    if (p == null) throw new Error('enable() не вызван');
+    return p;
+  }
+
+  it.each([
+    ['reject', () => Promise.reject(new Error('пользователь отклонил'))],
+    ['синхронный throw', () => {
+      throw new Error('сбой requestPermission');
+    }],
+  ])('requestPermission %s — enable() резолвится, тихая деградация', async (_case, impl) => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    MockNotification.requestPermission.mockImplementationOnce(impl);
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse([])));
+
+    render(<EnableHost />);
+    await expect(clickEnableAndAwait()).resolves.toBeUndefined();
+    await flush();
+
+    // permission остался default, уведомления не включились.
+    expect(screen.getByTestId('state')).toHaveTextContent('true:default:false');
+    expect(window.localStorage.getItem('browserNotify:enabled')).toBeNull();
+    // Без unhandled rejection в консоли.
+    expect(consoleError).not.toHaveBeenCalled();
   });
 });

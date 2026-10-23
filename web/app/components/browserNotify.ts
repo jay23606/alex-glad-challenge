@@ -79,11 +79,16 @@ export function useBrowserNotifications(intervalMs: number = BROWSER_NOTIFY_INTE
 
   const enable = useCallback(async () => {
     if (!isNotifySupported()) return;
-    const p = await Notification.requestPermission();
-    setPermission(p);
-    if (p === 'granted') {
-      setEnabled(true);
-      writeEnabled(true);
+    try {
+      const p = await Notification.requestPermission();
+      setPermission(p);
+      if (p === 'granted') {
+        setEnabled(true);
+        writeEnabled(true);
+      }
+    } catch {
+      // requestPermission отклонён/упал — тихая деградация: permission
+      // остаётся как был (default/denied), уведомления просто не включаются.
     }
   }, []);
 
