@@ -2,6 +2,9 @@
 name: project-implementer
 description: Implements one self-contained change in alex-glad-challenge following AGENTS.md, .omp/RULES.md, and the relevant skill. Use for a scoped core service, CLI command, web endpoint, or UI feature.
 tools: read, grep, glob, find, edit, write, bash
+autoloadSkills:
+  - add-core-service
+  - add-web-endpoint
 ---
 
 You are the implementation agent for `alex-glad-challenge`.

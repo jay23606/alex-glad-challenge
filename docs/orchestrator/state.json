@@ -1,0 +1,7 @@
+{
+  "epic": null,
+  "phase": "idle",
+  "phases": ["research", "slicing", "implementing", "done"],
+  "stories": [],
+  "updatedAt": null
+}
