@@ -35,7 +35,7 @@ interface Harness {
   deleted: number[];
   answers: Array<{ cbId: string; text?: string }>;
   scores: Array<{ chatId: string; userId: string; name: string; delta: number }>;
-  awards: Array<{ chatId: string; userId: string; kind: 'win' | 'play' }>;
+  awards: Array<{ chatId: string; userId: string; kind: 'win' | 'play'; roundSeq: number }>;
   logs: string[];
   clock: { now: number };
   nextMsgId: number;
@@ -89,8 +89,8 @@ function makeHarness(opts: ImprovGameOpts = {}, deps: Partial<ImprovDeps> = {}):
     addScore: (chatId, userId, name, delta) => {
       h.scores.push({ chatId, userId, name, delta });
     },
-    awardGame: (chatId, userId, kind) => {
-      h.awards.push({ chatId, userId, kind });
+    awardGame: (chatId, userId, kind, roundSeq) => {
+      h.awards.push({ chatId, userId, kind, roundSeq });
     },
     topScores: () => 'Игрок — 5',
     now: () => h.clock.now,
@@ -600,8 +600,8 @@ test('ревил: ничья по шаржу — бонус обоим паро�
   assert.deepEqual(
     [...h.awards].sort((a, b) => a.userId.localeCompare(b.userId)),
     [
-      { chatId: CHAT, userId: 'u1', kind: 'win' },
-      { chatId: CHAT, userId: 'u2', kind: 'win' },
+      { chatId: CHAT, userId: 'u1', kind: 'win', roundSeq: 1 },
+      { chatId: CHAT, userId: 'u2', kind: 'win', roundSeq: 1 },
     ],
     'ничья по шаржу — XP win обоим авторам',
   );
@@ -623,9 +623,39 @@ test('ревил: XP-хук — шарж → win, угадавший насто�
   await h.game.handleVote('cb3', CHAT, 'v3', 'Тоже обманутый', token, String(parodyLine.idx));
   await internals(h.game).reveal(CHAT);
   assert.deepEqual(h.awards, [
-    { chatId: CHAT, userId: 'v1', kind: 'play' },
-    { chatId: CHAT, userId: 'u1', kind: 'win' },
+    { chatId: CHAT, userId: 'v1', kind: 'play', roundSeq: 1 },
+    { chatId: CHAT, userId: 'u1', kind: 'win', roundSeq: 1 },
   ], 'play только угадавшему; win только автору золотого шаржа; обманутые и u2 без XP');
+});
+
+test('ревил: awardGame получает seq раунда — ref различим по раундам (#94)', async () => {
+  const h = makeHarness();
+  await startRound(h);
+  await fillAndClose(h, [
+    ['u1', 'Один', 'Пародия первая про чай'],
+    ['u2', 'Два', 'Пародия вторая про самовар'],
+  ]);
+  const realLine = variantLines().find((l) => l.text === REAL.text)!;
+  await h.game.handleVote('cb1', CHAT, 'v1', 'Знаток', voteButtons()[0].token, String(realLine.idx));
+  await internals(h.game).reveal(CHAT);
+  assert.deepEqual(h.awards, [{ chatId: CHAT, userId: 'v1', kind: 'play', roundSeq: 1 }]);
+
+  await startRound(h); // слот перезаписан — новый раунд, seq вырос
+  await fillAndClose(h, [
+    ['u1', 'Один', 'Пародия первой пародии про чай'],
+    ['u2', 'Два', 'Пародия второй пародии про самовар'],
+  ]);
+  // votePost()/voteButtons() ищут first match — для второго раунда парсим свой пост
+  const post2 = h.sent.findLast((s) => s.text.includes('голосование!'))!;
+  const token2 = post2.markup?.inline_keyboard[0][0]!.callback_data.split(':')[1]!;
+  const idx2 = /^(\d+)\. /.exec(post2.text.split('\n').find((l) => l.includes(`«${REAL.text}»`)) ?? '')?.[1]!;
+  await h.game.handleVote('cb2', CHAT, 'v2', 'Знаток2', token2, idx2);
+  await internals(h.game).reveal(CHAT);
+  assert.deepEqual(
+    h.awards.slice(1),
+    [{ chatId: CHAT, userId: 'v2', kind: 'play', roundSeq: 2 }],
+    'второй раунд — award c seq=2: ref improv:<chat>:<seq>:<user> уникален по раундам',
+  );
 });
 
 test('ревил: изображаемый, пародировавший сам себя, помечен', async () => {

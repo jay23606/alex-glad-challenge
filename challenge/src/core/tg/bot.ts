@@ -377,11 +377,12 @@ export class MediumBot {
       addScore: (chatId, userId, name, delta) => this.addScore(chatId, userId, name, delta),
       topScores: (chatId) => this.topScoresLine(chatId),
       // XP за TG-игры (#59): сбой геймификации не должен срывать ревил раунда.
-      awardGame: (chatId, userId, kind) => {
+      // ref с номером раунда: события разных раундов различимы (#94).
+      awardGame: (chatId, userId, kind, roundSeq) => {
         try {
           d.gamification?.award(
             kind === 'win' ? 'tg_game_win' : 'tg_game_play',
-            `improv:${chatId}:${userId}`,
+            `improv:${chatId}:${roundSeq}:${userId}`,
           );
         } catch (err) {
           console.error(`[tg-bot][improv] award XP упал: ${errText(err)}`);

@@ -350,21 +350,64 @@ test('improv XP (#59): ревил начисляет tg_game_play/tg_game_win ч
     await game.handleVote('cb1', CHAT, 'g1', 'Знаток', token, realIdx);
     await game.handleVote('cb2', CHAT, 'g2', 'Обманутый', token, parodyIdx);
     await timerSteps.reveal(CHAT);
-    const events = gamification.listEvents();
-    assert.deepEqual(
-      events.map((e) => e.type),
-      ['tg_game_win', 'tg_game_play'],
-      'win автору шаржа (p1), play угадавшему настоящую (g1)',
-    );
-    assert.equal(events[0]?.points, EVENT_POINTS.tg_game_win);
-    assert.equal(events[1]?.points, EVENT_POINTS.tg_game_play);
-    assert.equal(events[0]?.ref, `improv:${CHAT}:42`);
-    assert.equal(events[1]?.ref, `improv:${CHAT}:g1`);
+    // Ассерт по ref, не по порядку listEvents (#94): reverse-chron порядок не контракт.
+    // Приватное состояние ImprovGame, доступ только для теста: seq раунда входит в ref.
+    const improvRounds = (game as unknown as { rounds: Map<string, { seq: number }> }).rounds;
+    const roundSeq = improvRounds.get(CHAT)?.seq ?? -1;
+    const byRef = new Map(gamification.listEvents().map((e) => [e.ref, e]));
+    const win = byRef.get(`improv:${CHAT}:${roundSeq}:42`);
+    const play = byRef.get(`improv:${CHAT}:${roundSeq}:g1`);
+    assert.ok(win, `win-событие с ref improv:${CHAT}:<seq>:42 записано`);
+    assert.ok(play, `play-событие с ref improv:${CHAT}:<seq>:g1 записано`);
+    assert.equal(win.type, 'tg_game_win', 'win автору шаржа (p1)');
+    assert.equal(win.points, EVENT_POINTS.tg_game_win);
+    assert.equal(play.type, 'tg_game_play', 'play угадавшему настоящую (g1)');
+    assert.equal(play.points, EVENT_POINTS.tg_game_play);
     assert.equal(gamification.getStats().xp, EVENT_POINTS.tg_game_win + EVENT_POINTS.tg_game_play);
   } finally {
     h.bot.cancelTimers();
     gamification.close();
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('improv XP: сбой gamification.award не срывает ревил (#94)', async () => {
+  // Фейк с падающим award (приведение к GamificationDb — инъекция в makeBot):
+  // XP — best effort, ревил раунда не зависит от геймификации.
+  let awardCalls = 0;
+  const brokenGamification = {
+    award: () => {
+      awardCalls++;
+      throw new Error('xp storage down');
+    },
+  } as unknown as GamificationDb;
+  const h = makeBot({ gamification: brokenGamification });
+  try {
+    await startImprovRound(h);
+    const announce = h.announceId();
+    await h.bot.handleUpdate(messageUpdate(500, announce, 'Пародия первая про чай и самовар', 42));
+    await h.bot.handleUpdate(messageUpdate(501, announce, 'Пародия вторая про футбол', 43));
+    const game = improvOf(h);
+    // Таймеры шагаем вручную через приватные методы ImprovGame (как в тесте выше).
+    const steps = game as unknown as {
+      closeCollect(chatId: string): void;
+      reveal(chatId: string): Promise<void>;
+    };
+    await steps.closeCollect(CHAT);
+    const votePost = h.sent.find((m) => m.text.includes('голосование!'));
+    assert.ok(votePost, 'пост голосования ушёл');
+    // Голос за любой вариант: настоящая → play, пародия → win (золотой шарж) —
+    // в обоих случаях awardGame вызывается и фейк кидает.
+    const [cbData] = votePost!.markup?.inline_keyboard[0] ?? [];
+    const parts = cbData?.callback_data.split(':') ?? [];
+    assert.ok(parts[1] && parts[2], 'кнопка голосования разобрана');
+    await game.handleVote('cb1', CHAT, 'g1', 'Знаток', parts[1], parts[2]);
+    await steps.reveal(CHAT);
+    assert.equal(awardCalls, 1, 'award реально вызван и кинул — прогон не пустой');
+    assert.match(h.sent.at(-1)!.text, /🕵️ Раскрытие!/, 'ревил отправлен, хотя award кинул');
+    assert.equal(game.hasActiveRound(CHAT), null, 'раунд завершён штатно');
+  } finally {
+    h.bot.cancelTimers();
   }
 });
 

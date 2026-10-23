@@ -52,8 +52,11 @@ export interface ImprovDeps {
   plausibleDate: (fromId: string) => string | null;
   addScore: (chatId: string, userId: string, name: string, delta: number) => void;
   topScores: (chatId: string) => string; // «Имя — 5 · …» | ''
-  /** XP-хук (T4): «золотой шарж» → win, угадавший настоящую → play. Опционально. */
-  awardGame?: (chatId: string, userId: string, kind: 'win' | 'play') => void;
+  /** XP-хук (T4): «золотой шарж» → win, угадавший настоящую → play. Опционально.
+   *  roundSeq — номер раунда игры: ref XP-события уникален по раундам.
+   *  Контракт: хук НЕ должен бросать — вызывается синхронно внутри общего
+   *  try ревила, throw сорвёт пост раскрытия (в bot.ts award обёрнут в try). */
+  awardGame?: (chatId: string, userId: string, kind: 'win' | 'play', roundSeq: number) => void;
   now: () => number;
   log: (msg: string) => void;
 }
@@ -76,6 +79,7 @@ interface ImprovVariant {
 interface ImprovRound {
   chatId: string;
   token: string;
+  seq: number; // монотонный номер раунда — попадает в ref XP-события
   phase: 'collect' | 'vote';
   author: AuthorEntry;
   theme: string;
@@ -103,6 +107,10 @@ export interface ImprovGameOpts {
 export class ImprovGame {
   private readonly rounds = new Map<string, ImprovRound>();
   private readonly lastEndAt = new Map<string, number>();
+  // Номер последнего созданного раунда. Сбрасывается при рестарте процесса:
+  // ref не уникален/не дедуплицируется между запусками; если ref станет
+  // ключом идемпотентности — нужен персистентный счётчик или round.token.
+  private seq = 0;
   private readonly cooldownMs: number;
   private readonly collectMs: number;
   private readonly voteMs: number;
@@ -149,6 +157,7 @@ export class ImprovGame {
     const round: ImprovRound = {
       chatId: p.chatId,
       token: Math.random().toString(36).slice(2, 10),
+      seq: ++this.seq,
       phase: 'collect',
       author: p.author,
       theme: p.theme,
@@ -382,7 +391,7 @@ export class ImprovGame {
         if (!v) continue;
         if (v.authorUserId === null) {
           this.deps.addScore(chatId, voterId, round.voterNames.get(voterId) ?? 'участник', 1);
-          this.deps.awardGame?.(chatId, voterId, 'play');
+          this.deps.awardGame?.(chatId, voterId, 'play', round.seq);
         } else {
           this.deps.addScore(chatId, v.authorUserId, v.authorName, 1);
           parodyVotes.set(idx, (parodyVotes.get(idx) ?? 0) + 1);
@@ -396,7 +405,7 @@ export class ImprovGame {
           : [];
       for (const v of bestParodies) {
         this.deps.addScore(chatId, v.authorUserId as string, v.authorName, 1);
-        this.deps.awardGame?.(chatId, v.authorUserId as string, 'win');
+        this.deps.awardGame?.(chatId, v.authorUserId as string, 'win', round.seq);
       }
 
       const real = round.variants[round.realIdx];
