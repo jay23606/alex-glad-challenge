@@ -78,3 +78,34 @@ export function requireAuth(req: NextRequest): NextResponse | null {
     { status: 401, headers: { 'Cache-Control': 'no-store' } },
   );
 }
+
+/** Мобильный клиент: Bearer MOBILE_API_TOKEN. Наружу — только Boolean. */
+export function isMobileApiConfigured(): boolean {
+  const t = process.env.MOBILE_API_TOKEN?.trim();
+  return t !== undefined && t.length > 0;
+}
+
+function isValidMobileToken(value: string | null | undefined): boolean {
+  const expected = process.env.MOBILE_API_TOKEN?.trim();
+  if (value == null || value === '' || expected === undefined || expected.length === 0) {
+    return false; // fail-closed
+  }
+  return timingSafeEq(value, expected);
+}
+
+/** Извлекает и проверяет Authorization: Bearer из запроса. */
+export function isMobileAuthed(req: NextRequest): boolean {
+  const header = req.headers.get('authorization') ?? '';
+  const match = /^Bearer\s+(.+)$/i.exec(header);
+  if (!match) return false;
+  return isValidMobileToken(match[1].trim());
+}
+
+/** Второй auth-слой для API: cookie-сессия ИЛИ мобильный Bearer-токен. */
+export function requireApiAuth(req: NextRequest): NextResponse | null {
+  if (isValidSession(req.cookies.get(SESSION_COOKIE)?.value) || isMobileAuthed(req)) return null;
+  return NextResponse.json(
+    { error: 'unauthorized' },
+    { status: 401, headers: { 'Cache-Control': 'no-store' } },
+  );
+}

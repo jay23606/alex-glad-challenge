@@ -35,6 +35,7 @@ interface Harness {
   deleted: number[];
   answers: Array<{ cbId: string; text?: string }>;
   scores: Array<{ chatId: string; userId: string; name: string; delta: number }>;
+  awards: Array<{ chatId: string; userId: string; kind: 'win' | 'play' }>;
   logs: string[];
   clock: { now: number };
   nextMsgId: number;
@@ -53,6 +54,7 @@ function makeHarness(opts: ImprovGameOpts = {}, deps: Partial<ImprovDeps> = {}):
     deleted: [],
     answers: [],
     scores: [],
+    awards: [],
     logs: [],
     clock: { now: 10_000 },
     nextMsgId: 10,
@@ -86,6 +88,9 @@ function makeHarness(opts: ImprovGameOpts = {}, deps: Partial<ImprovDeps> = {}):
     plausibleDate: (_fromId: string) => DEFAULT_PARODY_DATE,
     addScore: (chatId, userId, name, delta) => {
       h.scores.push({ chatId, userId, name, delta });
+    },
+    awardGame: (chatId, userId, kind) => {
+      h.awards.push({ chatId, userId, kind });
     },
     topScores: () => 'Игрок — 5',
     now: () => h.clock.now,
@@ -592,6 +597,35 @@ test('ревил: ничья по шаржу — бонус обоим паро�
   const шаржLine = h.sent.at(-1)!.text.split('\n').find((l) => l.includes('Золотой шарж'));
   assert.ok(шаржLine, 'строка шаржа есть');
   assert.ok(шаржLine!.includes('(Один)') && шаржLine!.includes('(Два)'), 'ничейный шарж — оба автора');
+  assert.deepEqual(
+    [...h.awards].sort((a, b) => a.userId.localeCompare(b.userId)),
+    [
+      { chatId: CHAT, userId: 'u1', kind: 'win' },
+      { chatId: CHAT, userId: 'u2', kind: 'win' },
+    ],
+    'ничья по шаржу — XP win обоим авторам',
+  );
+});
+
+test('ревил: XP-хук — шарж → win, угадавший настоящую → play', async () => {
+  const h = makeHarness();
+  await startRound(h);
+  await fillAndClose(h, [
+    ['u1', 'Один', 'Пародия первая про чай'],
+    ['u2', 'Два', 'Пародия вторая про самовар'],
+  ]);
+  const lines = variantLines();
+  const realLine = lines.find((l) => l.text === REAL.text)!;
+  const parodyLine = lines.find((l) => l.text === 'Пародия первая про чай')!;
+  const token = voteButtons()[0].token;
+  await h.game.handleVote('cb1', CHAT, 'v1', 'Знаток', token, String(realLine.idx));
+  await h.game.handleVote('cb2', CHAT, 'v2', 'Обманутый', token, String(parodyLine.idx));
+  await h.game.handleVote('cb3', CHAT, 'v3', 'Тоже обманутый', token, String(parodyLine.idx));
+  await internals(h.game).reveal(CHAT);
+  assert.deepEqual(h.awards, [
+    { chatId: CHAT, userId: 'v1', kind: 'play' },
+    { chatId: CHAT, userId: 'u1', kind: 'win' },
+  ], 'play только угадавшему; win только автору золотого шаржа; обманутые и u2 без XP');
 });
 
 test('ревил: изображаемый, пародировавший сам себя, помечен', async () => {
@@ -615,6 +649,7 @@ test('ревил без голосов за пародии: шаржа нет, �
   await internals(h.game).reveal(CHAT);
   assert.ok(!h.sent.at(-1)!.text.includes('Золотой шарж'));
   assert.deepEqual(h.scores, []);
+  assert.deepEqual(h.awards, [], 'без голосов за пародии XP не начисляется');
 });
 
 test('неудача deleteMessage (бот не админ) → отмена раунда с честным текстом', async () => {

@@ -9,6 +9,7 @@ import {
   IconRss,
   IconSparkles,
   IconTelegram,
+  IconBolt,
 } from '../app/components/ui/icons';
 
 export interface NavItem {
@@ -91,6 +92,20 @@ export const navGroups: Array<{
       { href: '/summary', label: 'summary' },
       { href: '/admin/servers', label: 'серверы' },
       { href: '/settings', label: 'настройки' },
+    ],
+  },
+  {
+    tag: 'product',
+    icon: IconBolt,
+    items: [
+      { href: '/projects', label: 'проекты' },
+      { href: '/assistant', label: 'ассистент' },
+      { href: '/automation', label: 'автоматизация' },
+      { href: '/calendar', label: 'календарь' },
+      { href: '/gamification', label: 'геймификация' },
+      { href: '/notifications', label: 'уведомления' },
+      { href: '/support', label: 'поддержка' },
+      { href: '/integrations', label: 'интеграции' },
     ],
   },
 ];

@@ -11,6 +11,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 
+import type { StylePreset } from './stylePreset.js';
+import { resolveStylePreset } from './stylePreset.js';
+
 export interface BlogRow {
   id: number;
   slug: string;
@@ -18,6 +21,7 @@ export interface BlogRow {
   profile: string | null;    // имя профиля голоса в .data/profiles/<name>.json
   tg_chat_id: string | null; // chat_id TG-канала блога; null = общий TG_CHAT_ID
   sources: string | null;    // JSON-массив URL RSS; null = дефолтные футбольные фиды
+  style_preset: StylePreset; // пресет стиля (stylePreset.ts); 'default' = профиль + few-shot
   created_at: string;
 }
 
@@ -26,10 +30,11 @@ export const DEFAULT_BLOG_SLUG = 'lookatfacts';
 
 // Начальный состав блогов (seed при пустой таблице). Профили голоса и источники
 // двух новых блогов заполняются позже (PATCH /api/blogs/[slug], профили — /chat).
+// Блог «Факты» (lookatfacts) пишет пресетом Антонова (stylePreset.ts).
 const SEED_BLOGS: Array<Omit<BlogRow, 'id' | 'created_at'>> = [
-  { slug: DEFAULT_BLOG_SLUG, name: 'Иди на факты глянь', profile: 'default', tg_chat_id: null, sources: null },
-  { slug: 'artemia-artel', name: 'Артемия Артель', profile: null, tg_chat_id: null, sources: null },
-  { slug: 'nevsky-hram', name: 'Невский храм на Доваторцев', profile: null, tg_chat_id: null, sources: null },
+  { slug: DEFAULT_BLOG_SLUG, name: 'Иди на факты глянь', profile: 'default', tg_chat_id: null, sources: null, style_preset: 'antonov' },
+  { slug: 'artemia-artel', name: 'Артемия Артель', profile: null, tg_chat_id: null, sources: null, style_preset: 'default' },
+  { slug: 'nevsky-hram', name: 'Невский храм на Доваторцев', profile: null, tg_chat_id: null, sources: null, style_preset: 'default' },
 ];
 
 export interface NewsRow {
@@ -68,6 +73,7 @@ CREATE TABLE IF NOT EXISTS blogs (
   profile TEXT,
   tg_chat_id TEXT,
   sources TEXT,
+  style_preset TEXT NOT NULL DEFAULT 'default',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -122,6 +128,15 @@ export class BlogDb {
   // --- миграция мульти-блога (идемпотентно, при каждом открытии) ---
   private migrateBlogs(): void {
     const seeded = this.seedBlogs();
+    // Колонка style_preset: на свежей БД уже в CREATE (seed проставил 'antonov'
+    // блогу «Факты»). На легаси-базе — ALTER + разовый апдейт блога по умолчанию;
+    // повторно не трогаем, чтобы не перетирать выбор пользователя.
+    if (!this.hasColumn('blogs', 'style_preset')) {
+      this.db.exec(`ALTER TABLE blogs ADD COLUMN style_preset TEXT NOT NULL DEFAULT 'default'`);
+      this.db
+        .prepare(`UPDATE blogs SET style_preset = 'antonov' WHERE slug = ?`)
+        .run(DEFAULT_BLOG_SLUG);
+    }
     // На базах, созданных до мульти-блога, колонок нет — ALTER + разовый бэкфилл
     // всего существующего контента в блог по умолчанию. На свежей БД колонки уже
     // в CREATE, строк нет — бэкфилл не нужен.
@@ -153,10 +168,10 @@ export class BlogDb {
     const row = this.db.prepare('SELECT COUNT(*) AS n FROM blogs').get() as { n: number };
     if (row.n > 0) return false;
     const stmt = this.db.prepare(
-      'INSERT INTO blogs (slug, name, profile, tg_chat_id, sources) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO blogs (slug, name, profile, tg_chat_id, sources, style_preset) VALUES (?, ?, ?, ?, ?, ?)',
     );
     for (const b of SEED_BLOGS) {
-      stmt.run(b.slug, b.name, b.profile, b.tg_chat_id, b.sources);
+      stmt.run(b.slug, b.name, b.profile, b.tg_chat_id, b.sources, b.style_preset);
     }
     return true;
   }
@@ -187,11 +202,11 @@ export class BlogDb {
 
   updateBlog(
     id: number,
-    patch: { name?: string; profile?: string | null; tg_chat_id?: string | null; sources?: string | null },
+    patch: { name?: string; profile?: string | null; tg_chat_id?: string | null; sources?: string | null; style_preset?: StylePreset },
   ): void {
     const sets: string[] = [];
     const values: Array<string | null> = [];
-    for (const key of ['name', 'profile', 'tg_chat_id', 'sources'] as const) {
+    for (const key of ['name', 'profile', 'tg_chat_id', 'sources', 'style_preset'] as const) {
       const val = patch[key];
       if (val !== undefined) {
         sets.push(`${key} = ?`);
@@ -200,6 +215,11 @@ export class BlogDb {
     }
     if (sets.length === 0) return;
     this.db.prepare(`UPDATE blogs SET ${sets.join(', ')} WHERE id = ?`).run(...values, id);
+  }
+
+  // Пресет стиля блога; отсутствующий блог/неизвестное значение → 'default'.
+  getStylePreset(id: number): StylePreset {
+    return resolveStylePreset(this.getBlog(id)?.style_preset);
   }
 
   // --- news ---

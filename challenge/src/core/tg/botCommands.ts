@@ -12,9 +12,12 @@ export const BOT_COMMANDS = [
   'игра',
   'изобрази',
   'какбы',
+  'уровень',
   'reindex',
   'алиас',
   'алиасскан',
+  'блоги',
+  'авто',
   'off',
   'on',
   'стат',
@@ -28,8 +31,11 @@ export const BOT_COMMAND_ALIASES = {
   игра: 'medium_game',
   изобрази: 'medium_improv',
   какбы: 'medium_asif',
+  уровень: 'medium_level',
   алиас: 'alias',
   алиасскан: 'aliasscan',
+  блоги: 'blogs',
+  авто: 'auto',
   стат: 'stat',
 } as const;
 
@@ -47,6 +53,8 @@ const LATIN_TO_COMMAND: Readonly<Record<string, string>> = {
   мигра: 'игра',
   мизобрази: 'изобрази',
   мкакбы: 'какбы',
+  муровень: 'уровень',
+  level: 'уровень',
 };
 
 /** Команда → человекочитаемое описание для меню Telegram.
@@ -57,9 +65,12 @@ export const BOT_COMMAND_DESCRIPTIONS = {
   medium_game: 'Угадай, кто это сказал (/мигра)',
   medium_improv: 'Как это было сказано (/мизобрази)',
   medium_asif: 'Диалог с духом автора (/мкакбы)',
+  medium_level: 'XP, уровень и серия (/муровень)',
   reindex: 'Адм: дотянуть FTS-индекс',
   alias: 'Адм: алиасы ников (/алиас)',
   aliasscan: 'Адм: поиск прозвищ в базе (/алиасскан)',
+  blogs: 'Адм: блоги и правила автоматизации (/блоги)',
+  auto: 'Адм: /авто <блог> on|off|status|run',
   off: 'Адм: выключить бота',
   on: 'Адм: включить бота',
   stat: 'Адм: состояние (/стат)',

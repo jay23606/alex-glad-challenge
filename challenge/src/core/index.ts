@@ -18,6 +18,8 @@ export type { Constraint, ConstraintType } from './constraints.js';
 
 export { BlogDb } from './db.js';
 export type { NewsRow, PostRow, StyleSampleRow } from './db.js';
+export { STYLE_PRESETS, resolveStylePreset, stylePresetLabel, presetSystemPrompt, ANTONOV_SYSTEM_PROMPT } from './stylePreset.js';
+export type { StylePreset } from './stylePreset.js';
 export { DialogDb } from './dialogDb.js';
 export type { ChatRow, MessageRow, SerializedTaskState, PastQaRow } from './dialogDb.js';
 export { McpStdioClient } from './mcp.js';

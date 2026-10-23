@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "next dev -H 127.0.0.1",
     "build": "next build",
-    "postbuild": "node -e \"require('fs').cpSync('.next/static', '.next/standalone/web/.next/static', {recursive: true})\"",
+    "postbuild": "node -e \"const fs=require('fs'); if (fs.existsSync('.next/standalone')) fs.cpSync('.next/static', '.next/standalone/web/.next/static', {recursive: true})\"",
     "start": "next start -H 127.0.0.1",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

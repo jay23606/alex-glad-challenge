@@ -14,6 +14,7 @@ import {
   getEmbedConfig,
   getTgScanConfig,
   getTgBotConfig,
+  getGoogleCalendarConfig,
 } from '@challenge/core/env';
 
 loadEnvUpward();
@@ -127,3 +128,8 @@ export function isMcpAuthConfigured(): boolean {
 // индикатора /settings). Реализация — lib/auth.ts, единая для middleware и роутов
 // (оттуда её же видит middleware — поэтому НЕ здесь). Наружу только Boolean.
 export { isAdminAuthConfigured } from '../auth';
+
+/** Google Calendar OAuth: наружу только configured-флаг (значения секретов никогда). */
+export function getGoogleCalendarStatus(): { configured: boolean } {
+  return { configured: getGoogleCalendarConfig() !== null };
+}

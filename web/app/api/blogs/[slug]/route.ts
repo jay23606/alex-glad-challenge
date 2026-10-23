@@ -1,7 +1,8 @@
-// /api/blogs/[slug] — настройка блога. PATCH {name?, profile?, tgChatId?, sources?}
-// → updateBlog. requireAuth — второй auth-слой (мутирует конфиг блога). profile —
-// имя существующего профиля голоса (/chat) или null (сброс); sources — массив
-// http(s)-URL, [] → null (дефолтные фиды). server-only.
+// /api/blogs/[slug] — настройка блога. PATCH {name?, profile?, tgChatId?,
+// stylePreset?, sources?} → updateBlog. requireAuth — второй auth-слой (мутирует
+// конфиг блога). profile — имя существующего профиля голоса (/chat) или null
+// (сброс); sources — массив http(s)-URL, [] → null (дефолтные фиды);
+// stylePreset — 'default' | 'antonov' (core stylePreset.ts). server-only.
 import 'server-only';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -45,6 +46,7 @@ export async function PATCH(
       ...(patch.name !== undefined ? { name: patch.name } : {}),
       ...(patch.profile !== undefined ? { profile: patch.profile } : {}),
       ...(patch.tgChatId !== undefined ? { tg_chat_id: patch.tgChatId === '' ? null : patch.tgChatId } : {}),
+      ...(patch.stylePreset !== undefined ? { style_preset: patch.stylePreset } : {}),
       ...(patch.sources !== undefined
         ? { sources: patch.sources.length > 0 ? JSON.stringify(patch.sources) : null }
         : {}),

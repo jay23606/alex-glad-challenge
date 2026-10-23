@@ -52,6 +52,8 @@ export interface ImprovDeps {
   plausibleDate: (fromId: string) => string | null;
   addScore: (chatId: string, userId: string, name: string, delta: number) => void;
   topScores: (chatId: string) => string; // «Имя — 5 · …» | ''
+  /** XP-хук (T4): «золотой шарж» → win, угадавший настоящую → play. Опционально. */
+  awardGame?: (chatId: string, userId: string, kind: 'win' | 'play') => void;
   now: () => number;
   log: (msg: string) => void;
 }
@@ -380,6 +382,7 @@ export class ImprovGame {
         if (!v) continue;
         if (v.authorUserId === null) {
           this.deps.addScore(chatId, voterId, round.voterNames.get(voterId) ?? 'участник', 1);
+          this.deps.awardGame?.(chatId, voterId, 'play');
         } else {
           this.deps.addScore(chatId, v.authorUserId, v.authorName, 1);
           parodyVotes.set(idx, (parodyVotes.get(idx) ?? 0) + 1);
@@ -391,7 +394,10 @@ export class ImprovGame {
         best > 0
           ? round.variants.filter((v) => (parodyVotes.get(v.idx) ?? 0) === best && v.authorUserId !== null)
           : [];
-      for (const v of bestParodies) this.deps.addScore(chatId, v.authorUserId as string, v.authorName, 1);
+      for (const v of bestParodies) {
+        this.deps.addScore(chatId, v.authorUserId as string, v.authorName, 1);
+        this.deps.awardGame?.(chatId, v.authorUserId as string, 'win');
+      }
 
       const real = round.variants[round.realIdx];
       const lines = [

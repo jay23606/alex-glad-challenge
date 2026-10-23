@@ -9,6 +9,8 @@ import { createHash } from 'node:crypto';
 import { tgPublishSchema } from '../../../../lib/shared/forms';
 import { requireAuth, SESSION_COOKIE } from '../../../../lib/auth';
 import { publishToTelegram, tgPublishResponse, tgRateLimit } from '../../../../lib/server/tg-publish';
+import { getGamificationDb, getNotificationDb, getWebhookDb, withDb } from '../../../../lib/server/db';
+import { deliverEvent } from '../../../../lib/server/challenge';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -50,5 +52,17 @@ export async function POST(req: NextRequest): Promise<Response> {
     undefined,
     parsed.data.parseMode ?? 'HTML',
   );
+  if (outcome.ok) {
+    await withDb(() => {
+      getGamificationDb().award('post_published');
+      getNotificationDb().add({
+        type: 'post_published',
+        title: 'Пост опубликован',
+        body: parsed.data.text.slice(0, 160),
+        href: '/telegram/history',
+      });
+    });
+    void deliverEvent(getWebhookDb(), 'post_published', { text: parsed.data.text });
+  }
   return tgPublishResponse(outcome);
 }

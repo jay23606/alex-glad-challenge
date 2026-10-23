@@ -1,5 +1,6 @@
 // /api/blogs — список блогов (мульти-блог). GET → blogs + производные флаги
-// (hasProfile — профиль голоса задан и файл существует; sourcesCount; tgChatIdSet).
+// (hasProfile — профиль голоса задан и файл существует; sourcesCount; tgChatIdSet;
+// stylePreset — пресет стиля из blogs.style_preset).
 // server-only: core/ через chokepoint.
 import 'server-only';
 import { NextResponse } from 'next/server';
@@ -23,6 +24,7 @@ export async function GET(): Promise<Response> {
       hasProfile: Boolean(b.profile && names.includes(b.profile)),
       sourcesCount: blogSources(b).length,
       tgChatIdSet: b.tg_chat_id !== null,
+      stylePreset: b.style_preset,
       createdAt: b.created_at,
     }));
   });

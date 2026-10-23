@@ -8,6 +8,12 @@
 // наши страницы force-dynamic, fresh nonce на каждый view.
 //
 // runtime = nodejs: standalone-стек на Node, Buffer доступен, нет риска edge-API-гэпов.
+// Рантайм объявлен в `export const config` ниже — документированная форма
+// node-middleware (Next 15.5 stable); парсер уважает и топ-левел
+// `export const runtime`, обе формы равнозначны (get-page-static-info.js:
+// config.runtime ?? config.config.runtime). Реальная причина инцидента #77 —
+// не форма объявления, а dev-компиляция instrumentation.ts на edge
+// (подробности и фикс — в next.config.ts, блок «fix #77»).
 //
 // Day 36 — admin-auth гейт ПОСЛЕ nonce-кода (nonce-логика не тронута: прошлый инцидент
 // «пустой body»). Публичные пути — только точный allowlist PUBLIC_PATHS ниже, он
@@ -17,9 +23,7 @@
 // без nonce — это не HTML, CSP им не нужен. Fail-closed: env не задан → сессий
 // не бывает → всё кроме публичного уводит на /login.
 import { NextRequest, NextResponse } from 'next/server';
-import { SESSION_COOKIE, isValidSession } from './lib/auth';
-
-export const runtime = 'nodejs';
+import { SESSION_COOKIE, isValidSession, isMobileAuthed } from './lib/auth';
 
 // Публичные пути: точное совпадение pathname (префиксы не открываем). /jira, /demo и их
 // API открыты одновременно — иначе гость получает 401/редирект вместо формы.
@@ -73,8 +77,17 @@ export function middleware(request: NextRequest) {
 
   // --- Admin-auth гейт (day 36) ---
   const { pathname } = request.nextUrl;
-  const authed = isValidSession(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!PUBLIC_PATHS.has(pathname) && !authed) {
+  const cookieAuthed = isValidSession(request.cookies.get(SESSION_COOKIE)?.value);
+  // Мобильный клиент: Bearer MOBILE_API_TOKEN даёт доступ к /api/*, но не к страницам.
+  const apiMobileAuthed = pathname.startsWith('/api') && isMobileAuthed(request);
+  const authed = cookieAuthed || apiMobileAuthed;
+  // Входящие webhooks (T7): POST /api/integrations/inbound/<id> — приём событий от
+  // внешних сервисов БЕЗ сессии; авторизация — HMAC-подпись тела секретом хука из БД
+  // (проверяется в route). Открываем только POST на конкретный id: управление хуками
+  // (GET/POST /api/integrations/inbound, DELETE) остаётся за session-auth.
+  const isInboundWebhookPost =
+    request.method === 'POST' && /^\/api\/integrations\/inbound\/\d+$/.test(pathname);
+  if (!PUBLIC_PATHS.has(pathname) && !authed && !isInboundWebhookPost) {
     if (pathname.startsWith('/api')) {
       return NextResponse.json(
         { error: 'unauthorized' },
@@ -102,6 +115,9 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
+  // Документированная форма node-middleware (Next 15.5 stable); парсер
+  // уважает и топ-левел `export const runtime` (см. комментарий в шапке).
+  runtime: 'nodejs',
   matcher: [
     // Всё, кроме API, статики, картинок next/image, favicon. Prefetch-запросы пропускаем.
     {

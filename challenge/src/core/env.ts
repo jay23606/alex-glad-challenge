@@ -365,3 +365,25 @@ export function getPrivateLlmServiceConfig(): PrivateLlmServiceConfig {
     maxContextTokens: num('PRIVATE_LLM_MAX_CONTEXT_TOKENS', 3_500),
   };
 }
+
+/** Google Calendar OAuth (сервер-к-серверу). null если хотя бы одно поле отсутствует. */
+export interface GoogleCalendarConfig {
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+  calendarId: string;
+}
+
+export function getGoogleCalendarConfig(): GoogleCalendarConfig | null {
+  const clientId = process.env.GOOGLE_CALENDAR_CLIENT_ID?.trim() || '';
+  const clientSecret = process.env.GOOGLE_CALENDAR_CLIENT_SECRET?.trim() || '';
+  const refreshToken = process.env.GOOGLE_CALENDAR_REFRESH_TOKEN?.trim() || '';
+  const calendarId = process.env.GOOGLE_CALENDAR_ID?.trim() || '';
+  if (!clientId || !clientSecret || !refreshToken || !calendarId) return null;
+  return { clientId, clientSecret, refreshToken, calendarId };
+}
+
+/** Bearer-токен мобильного клиента. undefined если не задан. */
+export function getMobileApiToken(): string | undefined {
+  return process.env.MOBILE_API_TOKEN?.trim() || undefined;
+}

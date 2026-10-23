@@ -99,20 +99,23 @@ test('extractInvocation: обычный текст не инвокация', () 
   assert.equal(extractInvocation('просто сообщение @другойбот', 'medium'), null);
 });
 
-test('BOT_COMMANDS: фиксированный набор M1 + брендированные + админские', () => {
+test('BOT_COMMANDS: фиксированный набор M1 + брендированные + админские + gamification/automation', () => {
   assert.deepEqual(
     [...BOT_COMMANDS].sort(),
     [
       'off',
       'on',
       'reindex',
+      'авто',
       'алиас',
       'алиасскан',
+      'блоги',
       'игра',
       'изобрази',
       'какбы',
       'сказал',
       'стат',
+      'уровень',
       'цитата',
     ],
   );

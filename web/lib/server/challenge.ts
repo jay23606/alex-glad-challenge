@@ -120,3 +120,35 @@ export type {
   MessageEstimate,
   TokenEstimate,
 } from '@challenge/core/tokenEstimator';
+// Product: workspace (проекты/папки/элементы).
+export { WorkspaceDb } from '@challenge/core/workspaceDb';
+export type { ProjectRow, FolderRow, WorkspaceItemRow, ItemInput, ItemFilter } from '@challenge/core/workspaceDb';
+// Product: геймификация.
+export { GamificationDb, levelForXp, xpForLevel, EVENT_POINTS, ACHIEVEMENTS } from '@challenge/core/gamification';
+export type { GamificationStats, AwardResult, Achievement } from '@challenge/core/gamification';
+// Product: уведомления.
+export { NotificationDb, NotificationService } from '@challenge/core/notifications';
+export type { NotificationRow, NotificationInput, NotificationChannel } from '@challenge/core/notifications';
+// Product: автоматизация блогов.
+export { BlogAutomation, nextRunAfter } from '@challenge/core/automation';
+export type { AutomationRuleRow, AutomationRunRow, BlogRunOutcome, AutomationRunResult } from '@challenge/core/automation';
+// Product: календарь + Google Calendar.
+export { buildIcs, deadlineEvent } from '@challenge/core/calendar';
+export type { CalendarEvent } from '@challenge/core/calendar';
+export { GoogleCalendarClient } from '@challenge/core/googleCalendar';
+// Product: интеграции (webhooks).
+export { WebhookDb, deliverEvent, validateWebhookUrl, signPayload, verifySignature } from '@challenge/core/webhooks';
+export type { WebhookRow, WebhookEvent } from '@challenge/core/webhooks';
+// Product: интеграции (входящие webhooks).
+export { InboundHookDb, handleInboundEvent } from '@challenge/core/inboundWebhooks';
+export type { InboundHookRow, InboundTarget, InboundEvent } from '@challenge/core/inboundWebhooks';
+// Product: поддержка.
+export { SupportCenterDb, searchFaq, buildSupportContext, ARTEL_FAQ } from '@challenge/core/supportCenter';
+export type { FaqMatch, SupportTicketRow } from '@challenge/core/supportCenter';
+// Product: ИИ-помощник (контекст).
+export { renderAssistantContext, buildAssistantMessages } from '@challenge/core/assistant';
+export type { AssistantSnapshot } from '@challenge/core/assistant';
+// Product: env-конфиги (Google Calendar / мобильный токен) — наружу только значения,
+// не секреты; потребители маскируют.
+export { getGoogleCalendarConfig, getMobileApiToken } from '@challenge/core/env';
+export type { GoogleCalendarConfig } from '@challenge/core/env';

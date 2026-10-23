@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { MediumBot, weightedDistractors } from './bot.js';
+import { BotAutomationCommands } from './botAutomation.js';
+import type { BlogRow } from '../db.js';
+import { GamificationDb, EVENT_POINTS } from '../gamification.js';
 import { OutboxQueue, UserCommandQueue, ConcurrencyLimiter } from './botQueue.js';
 import type { OutboundMessage } from './botQueue.js';
 import type { TgCallbackQuery, TgUpdate } from './botApi.js';
@@ -42,6 +48,12 @@ function makeBot(
       hits: Array<{ topicId: number; msgId: number }>;
       rows: Map<string, unknown>;
     };
+    /** Задан → апдейты от этого userId проходят owner-гейт диспетчера. */
+    ownerChatId?: string;
+    /** Инъекция команд /блоги и /авто (по умолчанию не задана — как в проде без блога). */
+    automationCommands?: BotAutomationCommands;
+    /** XP за TG-игры (#59): инъекция геймификации (по умолчанию нет — как в тестах бота). */
+    gamification?: GamificationDb;
   } = {},
 ): BotHarness {
   const sent: OutboundMessage[] = [];
@@ -87,7 +99,14 @@ function makeBot(
     commandQueue: new UserCommandQueue(),
     kakbyLimiter: new ConcurrencyLimiter(3),
     directory: { get: () => DIRECTORY },
-    cfg: { allowChats: new Set([CHAT]), ownerChatId: null, pollTimeoutSec: 5, botToken: 'токен' },
+    cfg: {
+      allowChats: new Set([CHAT]),
+      ownerChatId: opts.ownerChatId ?? null,
+      pollTimeoutSec: 5,
+      botToken: 'токен',
+    },
+    automationCommands: opts.automationCommands,
+    gamification: opts.gamification,
     session,
     botId: '999',
     generateImitation: opts.generateImitation,
@@ -297,6 +316,55 @@ test('общий счёт: очки /игра видны в ревиле «из�
     assert.equal(game.hasActiveRound(CHAT), null, 'раунд завершён');
   } finally {
     h.bot.cancelTimers();
+  }
+});
+
+test('improv XP (#59): ревил начисляет tg_game_play/tg_game_win через gamification', async () => {
+  // Полный провод: хук из конструктора MediumBot → GamificationDb.award.
+  const dir = mkdtempSync(path.join(tmpdir(), 'tgxp-'));
+  const gamification = new GamificationDb(path.join(dir, 'g.sqlite'));
+  const h = makeBot({ gamification });
+  try {
+    await startImprovRound(h);
+    const announce = h.announceId();
+    await h.bot.handleUpdate(messageUpdate(500, announce, 'Пародия первая про чай и самовар', 42));
+    await h.bot.handleUpdate(messageUpdate(501, announce, 'Пародия вторая про футбол', 43));
+    const game = improvOf(h);
+    // Шаги таймера раунда вызываются вручную: доступ к приватным методам ImprovGame.
+    const timerSteps = game as unknown as {
+      closeCollect(chatId: string): void;
+      reveal(chatId: string): Promise<void>;
+    };
+    await timerSteps.closeCollect(CHAT);
+    const votePost = h.sent.find((m) => m.text.includes('голосование!'));
+    assert.ok(votePost, 'пост голосования ушёл');
+    const buttons = votePost!.markup?.inline_keyboard[0] ?? [];
+    const token = buttons[0]?.callback_data.split(':')[1] ?? '';
+    const idxOf = (marker: string): string | undefined => {
+      const line = votePost!.text.split('\n').find((l) => l.includes(marker));
+      return /^(\d+)\. /.exec(line ?? '')?.[1];
+    };
+    const realIdx = idxOf('«Настоящая цитата автора про футбол и парковку»');
+    const parodyIdx = idxOf('«Пародия первая про чай и самовар»');
+    assert.ok(token && realIdx && parodyIdx, 'кнопки и варианты разобраны');
+    await game.handleVote('cb1', CHAT, 'g1', 'Знаток', token, realIdx);
+    await game.handleVote('cb2', CHAT, 'g2', 'Обманутый', token, parodyIdx);
+    await timerSteps.reveal(CHAT);
+    const events = gamification.listEvents();
+    assert.deepEqual(
+      events.map((e) => e.type),
+      ['tg_game_win', 'tg_game_play'],
+      'win автору шаржа (p1), play угадавшему настоящую (g1)',
+    );
+    assert.equal(events[0]?.points, EVENT_POINTS.tg_game_win);
+    assert.equal(events[1]?.points, EVENT_POINTS.tg_game_play);
+    assert.equal(events[0]?.ref, `improv:${CHAT}:42`);
+    assert.equal(events[1]?.ref, `improv:${CHAT}:g1`);
+    assert.equal(gamification.getStats().xp, EVENT_POINTS.tg_game_win + EVENT_POINTS.tg_game_play);
+  } finally {
+    h.bot.cancelTimers();
+    gamification.close();
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -543,4 +611,64 @@ test('weightedDistractors: активные авторы выбираются ч
   }
   // 3 громких (вес 500) против 30 тихих (вес 1): ожидание ~1500/2000, допускаем шум
   assert.ok(loudPicks > runs * 0.7, `громкие доминируют: ${loudPicks}/${runs}`);
+});
+
+test('dispatch #58: /уровень доступен не-owner, /блоги и /авто — молчание (owner-only)', async () => {
+  // ownerChatId: null в makeBot → все апдейты не-owner; gamification не инжектнут,
+  // поэтому guard-ответ cmdLevel доказывает достижимость публичной секции диспетчера.
+  const h = makeBot();
+  try {
+    await h.bot.handleUpdate(messageUpdate(600, undefined, '/уровень'));
+    assert.equal(h.sent.length, 1, '/уровень — публичная: не-owner получает ответ');
+    assert.match(h.sent[0]?.text ?? '', /Геймификация недоступна/);
+    await h.bot.handleUpdate(messageUpdate(601, undefined, '/блоги'));
+    await h.bot.handleUpdate(messageUpdate(602, undefined, '/авто idinafakty on'));
+    assert.equal(h.sent.length, 1, 'owner-команды для не-owner — молчание');
+  } finally {
+    h.bot.cancelTimers();
+  }
+});
+
+test('dispatch #58: owner проходит гейт — /блоги отвечает списком блогов', async () => {
+  // Зеркало теста выше: молчание для не-owner не доказывает, что легитимный
+  // owner доходит до cmdBlogs (гейт bot.ts: if (!ctx.isOwner) return).
+  const ownerSent: Array<{ chatId: string; text: string; replyTo?: number }> = [];
+  const blogs: BlogRow[] = [
+    {
+      id: 1,
+      slug: 'idinafakty',
+      name: 'Иди на факты глянь',
+      profile: null,
+      tg_chat_id: null,
+      sources: null,
+      style_preset: 'default',
+      created_at: '2026-01-01T00:00:00.000Z',
+    },
+  ];
+  const automationCommands = new BotAutomationCommands({
+    automation: {
+      getRule: () => null,
+      listRuns: () => [],
+      upsertRule: () => true,
+      runNow: async () => ({ blogId: 1, status: 'success', message: 'Пост создан', postId: 1 }),
+    },
+    blogs: { listBlogs: () => blogs },
+    send: async (chatId, text, replyTo) => {
+      ownerSent.push({ chatId, text, replyTo });
+    },
+  });
+  const h = makeBot({ ownerChatId: '777', automationCommands });
+  try {
+    await h.bot.handleUpdate(messageUpdate(610, undefined, '/блоги', 777));
+    assert.equal(ownerSent.length, 1, 'owner получает ответ на /блоги');
+    assert.equal(ownerSent[0]?.chatId, CHAT);
+    assert.equal(ownerSent[0]?.replyTo, 610);
+    assert.match(ownerSent[0]?.text ?? '', /idinafakty \(#1\) — «Иди на факты глянь»/);
+    // Тот же бот: не-owner по-прежнему молчит (гейт стоит до automationCommands).
+    await h.bot.handleUpdate(messageUpdate(611, undefined, '/блоги', 42));
+    assert.equal(ownerSent.length, 1, 'не-owner ответа не получает');
+    assert.equal(h.sent.length, 0, 'ответ шёл через automationCommands.send, не через общий outbox');
+  } finally {
+    h.bot.cancelTimers();
+  }
 });

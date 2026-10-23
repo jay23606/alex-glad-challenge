@@ -35,3 +35,23 @@ Project rules win over global rules.
 - Validate with the commands in `AGENTS.md` §10. Lint is not configured; do not
   invent a lint command.
 - Do not commit or push unless the user explicitly asks.
+- Finding outside scope → issue via `.github/ISSUE_TEMPLATE/bug.md` with label
+  `P0`–`P3`; do not fix it in the current task. Exception: `P0`/`incident` and
+  blockers needed to reach AGENTS §10.
+- WIP = 1 `in-progress` per executor; triage findings before closing the current
+  task (AGENTS §13.9).
+- Стадийные профили: граф `Research → Plan → Fix → Validation → Report` обязателен;
+  стадия Validation (персоны `code-reviewer` + `test-engineer`) и финальный Report
+  не пропускаются и не подменяются ad-hoc проверками (AGENTS §13.2–§13.3).
+- Профиль выбирает ассистент сам (§13.1), объявляет одной строкой и следует ему
+  СТРОГО; `ask` — только при реальной неоднозначности, иначе консервативный выбор.
+- Крупная фича = эпик (label `epic`) → разбивается на story-issues (label `story`)
+  ДО старта, с тем же milestone и `loop-run` (AGENTS §13.9). Баги, недоразумения и
+  недопонимания, найденные по ходу flow, сразу заводятся issues — не чинятся «заодно».
+- Time and completion are proven by `scripts/loop-metrics.mjs` and `Closes #N`,
+  not by self-report.
+- The execution loop never starts by itself: explicit `loop-run` /
+  "execution loop" / "пул задач" request, or an existing milestone.
+  Instrumented run = milestone + `loop-run` on every issue; failed first
+  attempt = `iteration:2` + one `cause:*`; stop to ask the user = `asked-user`
+  (AGENTS §13.9).

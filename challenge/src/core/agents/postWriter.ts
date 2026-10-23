@@ -10,6 +10,7 @@ import type { BlogDb, NewsRow, StyleSampleRow } from '../db.js';
 import type { LlmClient } from '../client.js';
 import { msg } from '../types.js';
 import type { ProfileManager } from '../profile.js';
+import { presetSystemPrompt } from '../stylePreset.js';
 
 export interface WrittenPost {
   content: string;
@@ -30,7 +31,11 @@ export class PostWriter {
   ) {}
 
   async write(db: BlogDb, news: NewsRow, opts: WriteOptions = {}): Promise<WrittenPost> {
-    const samples = db.styleSamples(3, opts.blogId);
+    // Пресет стиля блога (blogs.style_preset) заменяет system-промпт целиком;
+    // few-shot style_samples для пресета пропускаем — промпт пресета самодостаточен.
+    const presetPrompt =
+      opts.blogId != null ? presetSystemPrompt(db.getStylePreset(opts.blogId)) : null;
+    const samples = presetPrompt ? [] : db.styleSamples(3, opts.blogId);
 
     // --- Извлекаем ВСЕ поля профиля ---
     const p = this.profile?.active;
@@ -46,7 +51,16 @@ export class PostWriter {
     const language = p?.язык ?? 'русский';
 
     // --- System-промпт: роль + жёсткие правила стиля ---
-    const system = `Ты — автор Telegram-канала «${channel}» (${topic}).
+    // Пресет идёт поверх профиля: профиль продолжает давать канал/табу/подпись.
+    const system = presetPrompt
+      ? `${presetPrompt}
+
+КАНАЛ И ПРОФИЛЬ (обязательно):
+- Шапка поста: «${channel}: » (без даты/времени). Первый символ ответа — «${channel[0]}».
+- Подпись в конце: ${signature}
+- Табу: ${taboos}.
+- Язык: ${language}.`
+      : `Ты — автор Telegram-канала «${channel}» (${topic}).
 Ты пишешь ${style}. Язык: ${language}.
 
 ЖЁСТКИЕ ПРАВИЛА СТИЛЯ:

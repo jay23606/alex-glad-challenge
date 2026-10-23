@@ -1,0 +1,11 @@
+# Retrofit/OkHttp and kotlinx.serialization are kept intact.
+-dontwarn okhttp3.internal.platform.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**
+-keepattributes Signature, InnerClasses, EnclosingMethod, RuntimeVisibleAnnotations
+-keepclassmembers class kotlinx.serialization.json.** { *** Companion; }
+-keepclasseswithmembers class kotlinx.serialization.json.** { kotlinx.serialization.KSerializer serializer(...); }
+-keep,includedescriptorclasses class ru.memo7.artel.**$$serializer { *; }
+-keepclassmembers class ru.memo7.artel.** { *** Companion; }
+-keepclasseswithmembers class ru.memo7.artel.** { kotlinx.serialization.KSerializer serializer(...); }

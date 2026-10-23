@@ -9,6 +9,7 @@ import { MobileNav } from './MobileNav';
 import { NavCoreLinks } from './NavLinks';
 import { LogoutButton } from './LogoutButton';
 import { ThemeToggle } from './ThemeToggle';
+import { NotificationBell } from './NotificationBell';
 
 export default function Nav({ isAdmin = false }: { isAdmin?: boolean }) {
   const keys = isAdmin ? getKeysStatus() : null;
@@ -44,6 +45,7 @@ export default function Nav({ isAdmin = false }: { isAdmin?: boolean }) {
                   </span>
                 )}
               </div>
+              <NotificationBell />
               <ThemeToggle />
               <LogoutButton />
             </div>

@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Card } from '../components/ui/Card';
 import { StatusDot } from '../components/ui/StatusDot';
 import { SectionHead } from '../components/ui/SectionHead';
+import { ThemePalette } from '../components/ThemePalette';
 
 interface SettingsView {
   model: string | null;
@@ -145,6 +146,10 @@ export default function SettingsPage() {
             {!modelPref && <span className="text-xs text-dim">(не задан)</span>}
           </div>
         </fieldset>
+      </Card>
+
+      <Card label="Тема">
+        <ThemePalette />
       </Card>
     </div>
   );

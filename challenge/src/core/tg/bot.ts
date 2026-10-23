@@ -27,6 +27,9 @@ import { OutboxQueue, SendError, UserCommandQueue, ConcurrencyLimiter, errText }
 import type { OutboundMessage, InlineKeyboard } from './botQueue.js';
 import { ImprovGame } from './botImprov.js';
 import { guardImaginedReply } from './jokerMarker.js';
+import { BotAutomationCommands } from './botAutomation.js';
+import { createTgAutomationRunner } from './automationRun.js';
+import { GamificationDb } from '../gamification.js';
 
 // Целевой чат фичи (t.me/lookAtFactsChat). Бот отвечает в любом чате из
 // allow-list, но данные (цитаты/игра) — всегда из этого чата.
@@ -156,7 +159,7 @@ export async function runTgBot(opts: RunTgBotOpts = {}): Promise<void> {
     ([command, description]) => ({ command, description }),
   );
   const publicMenu = menu.filter((c) =>
-    ['medium_quote', 'medium_said', 'medium_game', 'medium_improv', 'medium_asif'].includes(c.command),
+    ['medium_quote', 'medium_said', 'medium_game', 'medium_improv', 'medium_asif', 'medium_level'].includes(c.command),
   );
   try {
     await api.setMyCommands(publicMenu);
@@ -183,6 +186,16 @@ export async function runTgBot(opts: RunTgBotOpts = {}): Promise<void> {
     onError: (msg) => console.error(`[tg-bot][queue] ${msg}`),
   });
 
+  // Блог-автоматизация (/блоги, /авто) и XP-профиль (/уровень): core-раннер и
+  // геймификация живут в .data/*.sqlite рядом с tg.sqlite (пути — dataPath).
+  const automationRunner = createTgAutomationRunner();
+  const gamification = new GamificationDb(dataPath('gamification.sqlite'));
+  const automationCommands = new BotAutomationCommands({
+    automation: automationRunner.automation,
+    blogs: automationRunner.blogs,
+    send: (chatId, text, replyTo) => queue.enqueue({ chatId, text, replyTo }),
+  });
+
   const session = { startedAt: Date.now(), updatesSeen: 0, enabled: store.getState('enabled') !== '0' };
   const bot = new MediumBot({
     api,
@@ -196,6 +209,8 @@ export async function runTgBot(opts: RunTgBotOpts = {}): Promise<void> {
     session,
     botId: String(me.id),
     botUsername: me.username,
+    automationCommands,
+    gamification,
   });
 
   let offset = Number(store.getState('poll_offset') ?? '0') || 0;
@@ -254,6 +269,8 @@ export async function runTgBot(opts: RunTgBotOpts = {}): Promise<void> {
   store.setState('poll_offset', String(offset));
   store.close();
   fts.close();
+  automationRunner.close();
+  gamification.close();
   console.error('[tg-bot] остановлен.');
   process.exit(0);
 }
@@ -270,6 +287,10 @@ interface MediumDeps {
   session: { startedAt: number; updatesSeen: number; enabled: boolean };
   botId: string;
   botUsername?: string;
+  /** /уровень: глобальный XP-профиль (геймификация). Опционально — тесты бота. */
+  gamification?: GamificationDb;
+  /** /блоги и /авто: команды блог-автоматизации. Опционально — тесты бота. */
+  automationCommands?: BotAutomationCommands;
   /** Генератор реплики /какбы (инъекция для тестов; дефолт — LLM DeepSeek). */
   generateImitation?: (author: AuthorEntry, history: ChatMessage[], samples: string[]) => Promise<string>;
 }
@@ -355,6 +376,17 @@ export class MediumBot {
       plausibleDate: (fromId) => d.store.sampleAuthorDate(BOT_CHAT_KEY, BOT_TOPIC_ID, fromId),
       addScore: (chatId, userId, name, delta) => this.addScore(chatId, userId, name, delta),
       topScores: (chatId) => this.topScoresLine(chatId),
+      // XP за TG-игры (#59): сбой геймификации не должен срывать ревил раунда.
+      awardGame: (chatId, userId, kind) => {
+        try {
+          d.gamification?.award(
+            kind === 'win' ? 'tg_game_win' : 'tg_game_play',
+            `improv:${chatId}:${userId}`,
+          );
+        } catch (err) {
+          console.error(`[tg-bot][improv] award XP упал: ${errText(err)}`);
+        }
+      },
       now: () => Date.now(),
       log: (msg) => console.error(`[tg-bot][improv] ${msg}`),
     });
@@ -513,6 +545,8 @@ export class MediumBot {
         return this.cmdImprov(cmd.args, ctx);
       case 'какбы':
         return this.cmdKakby(cmd.args, ctx);
+      case 'уровень':
+        return this.cmdLevel(ctx);
       default:
         break;
     }
@@ -530,9 +564,38 @@ export class MediumBot {
         return this.cmdSetEnabled(true, ctx);
       case 'стат':
         return this.cmdStat(ctx);
+      case 'блоги':
+        if (!this.d.automationCommands) {
+          await this.reply(ctx.chatId, 'Автоматизация не сконфигурирована.', ctx.replyTo);
+          return;
+        }
+        return this.d.automationCommands.cmdBlogs(ctx.chatId, ctx.replyTo);
+      case 'авто':
+        if (!this.d.automationCommands) {
+          await this.reply(ctx.chatId, 'Автоматизация не сконфигурирована.', ctx.replyTo);
+          return;
+        }
+        return this.d.automationCommands.cmdAuto(cmd.args, ctx.chatId, ctx.replyTo);
       default:
         return;
     }
+  }
+
+  /** /уровень — глобальный XP-профиль чата (уровень/XP/серия/прогресс). */
+  private async cmdLevel(ctx: CommandCtx): Promise<void> {
+    const gamification = this.d.gamification;
+    if (!gamification) {
+      await this.reply(ctx.chatId, 'Геймификация недоступна.', ctx.replyTo);
+      return;
+    }
+    const s = gamification.getStats();
+    const pct = Math.round(s.levelProgress * 100);
+    await this.reply(
+      ctx.chatId,
+      `🏆 Уровень ${s.level} · ${s.xp} XP (до уровня ${s.level + 1} — ${s.nextLevelXp} XP, прогресс ${pct}%).\n` +
+        `🔥 Серия: ${s.streak} дн. (рекорд: ${s.bestStreak} дн.)`,
+      ctx.replyTo,
+    );
   }
 
   private async cmdQuote(args: string, ctx: CommandCtx): Promise<void> {

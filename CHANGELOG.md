@@ -1068,15 +1068,32 @@ challenge 153/153, web 238/238. Ур.2 — 5 smoke-сценариев через
 Research — форма без глубины; точечный SQL-фикс — корректен за 10.5 с.
 Таблица и рекомендация «где хватает локальной» — в отчёте.
 
-**День 5 (Execution Loop):** пул 21 issue в GitHub (#15–#37, labels
-day-3/4/5 × bug/test/feature/docs/chore). Два прогона без единой паузы:
-Прогон 1 — 6 задач (Дни 3–4), Прогон 2 — 17 задач (пул). С первого раза
-83% → 93%; финальная валидация challenge 167/167, web 254/254. Итоги пула:
+**День 5 (Execution Loop):** 23 issue в GitHub (#15–#37; 21 в пуле + 2 по
+находкам smoke Дня 3), labels day-3/4/5 × bug/test/feature/docs/chore. Два
+прогона без паузы: 6 задач (Дни 3–4) за 37.4 мин, 17 задач пула за 25.6 мин —
+факт по git/GitHub timestamps (методика в отчёте); «с первого раза» 83% → 93%
+— самоотчёт, артефактов итераций нет. Финальная валидация challenge 167/167,
+web 254/254. Итоги пула:
 разорван цикл core/index↔agents; 3 роута возвращены за chokepoint; TG-env
 читается только через accessors env.ts; requireAuth добавлен на
 /api/rag/index; /api/health (публичный) + rewrite /todos; 27 новых тестов;
 доки (AUTHORIZATION, профили в README, шаблон профиля §13.8); #28 закрыт как
 неактуальный, #37 — не-баг (дев-овлея Next).
+
+**Процесс (после Дня 5):** находки вне скоупа не чинятся «заодно» — заводятся
+issues по `.github/ISSUE_TEMPLATE/bug.md` с приоритетом `P0`–`P3`; текущая
+задача продолжается, кроме `P0`/`incident` (`AGENTS.md` §13.9). Лимиты: WIP=1
+`in-progress`, repro ≤3, Fix↔Validation ≤2, открытых `P0`/`incident` — 0,
+`P1` — ≤5. Метки GitHub: `P0`–`P3`, `incident`, `hotfix`, `in-progress`,
+`needs-triage`, `blocked`. Метрики: `node scripts/loop-metrics.mjs --from N
+--to M` (GitHub API; старт из `in-progress`, fallback — закрытие предыдущей).
+Причина: время в отчёте Дня 5 было самоотчётом (заявлялось ~160 мин, фактически
+25.6). Loop включается только явно (`loop-run` / «execution loop» / «пул
+задач») и инструментируется milestone + `loop-run`; провал первой попытки —
+`iteration:2` + `cause:*`, остановка с вопросом — `asked-user`. Без этих меток
+`loop-metrics.mjs` печатает `n/a` для first-try/остановок/причин, а не 0 и не
+оценку. Правило harness-нейтральное: источник истины — `AGENTS.md`,
+`.omp/RULES.md` дублирует инварианты, шаблоны и метки живут в GitHub.
 
 **Риски/ограничения:** перебор локальных моделей ограничен 16GB RAM;
 vitest на этом хосте — только с --maxWorkers=2 (AGENTS §10); 3 итерации в
@@ -1091,3 +1108,303 @@ vitest на этом хосте — только с --maxWorkers=2 (AGENTS §10)
   `web/middleware.ts`, `web/next.config.ts`
 - `web/test/unit/{it-facts,rag-index-route,health-route,session,forms}.spec.ts`
 - GitHub Issues #15–#37 (все закрыты)
+
+---
+
+## ADVANCED Day 5 (продолжение) — Product loop: геймификация, ИИ-помощник, автоматизация, интеграции, Android
+
+**Дата:** 2026-10-23. Исполнитель: агент (execution loop, профиль Бизнес-фича §13.3).
+Пул: issues #38–#50, milestone `run-2026-10-23-product`.
+
+**Задание (полный текст):**
+> Реализовать фичи: геймификация, ИИ-помощник, полная автоматизация указанных
+> блогов через сайт и TG-бота (для «Факты глянь» — стандартный промпт Антонова),
+> интеграции с Телеграмом, календарями, проекты/папки. Также: смена темы,
+> интеграция с Google Calendar, интеграция с другими сервисами, уведомления,
+> поддержка. Затем нативное Android-приложение с небанальным дизайном,
+> поддерживающее функциональность web. Рефакторинг без потери работоспособности.
+
+**Сделано (core, `challenge/src/core/`):**
+- `workspaceDb.ts` — проекты → папки → элементы (заметки/задачи/ссылки), каскадное
+  удаление, `listUpcoming` для календаря.
+- `gamification.ts` — XP/уровни (100·n²), ежедневные серии, 8 достижений, журнал.
+- `notifications.ts` — центр уведомлений + DI-фан-аут по каналам.
+- `automation.ts` — правила-расписания per blog, история запусков, `runDue`/`runNow`.
+- `calendar.ts` + `googleCalendar.ts` — ICS (RFC 5545) и клиент Google Calendar
+  (OAuth refresh, без внешних зависимостей).
+- `webhooks.ts` — исходящие webhook-подписки, HMAC-SHA256, доставка с таймаутом.
+- `supportCenter.ts` — FAQ-поиск по токенам + тикеты (FAQ про сам продукт).
+- `assistant.ts` — снапшот состояния → системный промпт ассистента.
+- `env.ts` — accessors `getGoogleCalendarConfig` / `getMobileApiToken`.
+
+**Сделано (web, `web/`):**
+- API: `/api/workspace/*`, `/api/gamification`, `/api/notifications`,
+  `/api/automation`, `/api/calendar` + `feed.ics` + `sync`, `/api/integrations/webhooks`,
+  `/api/support/{faq,tickets}`, `/api/assistant`, `/api/mobile/bootstrap`.
+- UI: `/projects`, `/gamification`, `/notifications`, `/automation`, `/calendar`,
+  `/support`, `/assistant`, `/integrations` + группа навигации `product`,
+  колокольчик в Nav.
+- Тема: 4 палитры (dark/light/sepia/neon) + system, выбор в /settings.
+- Мобильный доступ: `Authorization: Bearer MOBILE_API_TOKEN` для `/api/*`.
+- Автоматизация: `web/lib/server/automation-service.ts` — конвейер поста + стиль
+  Антонова для блога «Иди на факты глянь» + автопубликация в TG.
+
+**Android:** `android/` — Kotlin + Jetpack Compose, тёмная тема с акцентом
+(#8B7CFF) и лаймом, экраны подключения/дашборда/проектов/автоматизации/
+календаря/уведомлений/ассистента/поддержки/настроек, сетевой слой к реальным API.
+
+**Рефакторинг:** `web/lib/server/db.ts` — единый реестр singleton; `http.ts` —
+общие JSON-хелперы (error/ok envelope + no-store).
+
+**Проверки:** challenge typecheck + 196 тестов; web typecheck + 262 теста;
+web build — 48 страниц генерируются, падает только на standalone-symlink
+(EPERM на Windows — известное окружение, не код).
+
+**Риски/ограничения:** Google Calendar требует OAuth-креды; без них — .ics-экспорт.
+Автоматизация выполняется, пока запущен сервер (расписание без внешнего cron).
+TG-бот «Медиум» (чат-память) не изменён — автоматизация управляется с web.
+
+**Код:** `challenge/src/core/{workspaceDb,gamification,notifications,automation,calendar,googleCalendar,webhooks,supportCenter,assistant}.ts`,
+`web/app/api/{workspace,gamification,notifications,automation,calendar,integrations,support,assistant,mobile}/**`,
+`web/app/{projects,gamification,notifications,automation,calendar,support,assistant,integrations}/page.tsx`,
+`android/**`. GitHub Issues #38–#50.
+
+---
+
+## Fix #51 — `pnpm --filter web build` на Windows: standalone только вне win32
+**Дата:** 2026-10-24. Профиль «Поиск бага» (AGENTS §13), issue #51 (bug P3).
+
+**Симптом:** на Windows `next build` проходил compile, manifest'ы и prerender
+всех страниц, но падал на этапе 'Collecting build traces' с `EPERM` при
+создании symlink react → `.next/standalone/node_modules/react`: без Developer
+Mode создание symlink на Windows запрещено. Это ограничение окружения, не кода
+(отмечалось ещё в ADVANCED Day 1 и Дне 5); падала только трассировка
+standalone-артефакта.
+
+**Решение:** standalone нужен только prod-деплою на Linux
+(`docs/HERMES-DEPLOY-RUNBOOK.md`), поэтому в `web/next.config.ts` он включается
+только при `process.platform !== 'win32'` либо явно: `NEXT_STANDALONE=1`
+(форс-флаг для CI/Linux: включает standalone-вывод, но прав на symlink на
+Windows не добавляет — без Developer Mode/админа сборка упадёт той же EPERM). Обычный build
+достаточен для `next start`/дев-смоков — start standalone-артефакт не требует.
+`postbuild` в `web/package.json` (копия `.next/static` в standalone) выполняется
+только когда `.next/standalone` существует — иначе на Windows он падал бы
+следом с ENOENT. Поведение Linux-деплоя не изменилось.
+
+**Проверки:** на этой Windows-машине `pnpm --filter web build` — код 0
+(48 страниц), `pnpm --filter web typecheck` и `pnpm --filter web test` — зелёные.
+
+**Код:** `web/next.config.ts`, `web/package.json` (guard postbuild).
+
+---
+
+## Feature: пресет стиля блога (stylePreset) — стиль на этапе генерации
+**Дата:** 2026-10-24. Issues #65, #83; хак удалён по #56.
+
+**Что сделано:**
+- `challenge/src/core/stylePreset.ts` (новый) — реестр пресетов:
+  `StylePreset = 'default' | 'antonov'`; `ANTONOV_SYSTEM_PROMPT` — компактная
+  выжимка «Антоновайзера», зашита константой (md в рантайме не читается);
+  `resolveStylePreset` — всё, кроме точного `antonov` (включая null/мусор),
+  резолвится в `default`; `stylePresetLabel`, `presetSystemPrompt`.
+- Хранение: колонка `blogs.style_preset` (`TEXT NOT NULL DEFAULT 'default'`);
+  seed — «Иди на факты глянь» = `antonov`, остальные `default`. Миграция
+  легаси-БД идемпотентна: `hasColumn`-guard → `ALTER TABLE ... ADD COLUMN` +
+  разовый backfill дефолт-блога; повторное открытие выбор пользователя не
+  перетирает. Битое/неизвестное значение читается как `default`.
+- Течение: `runNewsPipeline` → PostWriter — при активном пресете system-промпт =
+  промпт пресета + блок «КАНАЛ И ПРОФИЛЬ», few-shot `style_samples`
+  пропускаются; без `blogId` (легаси/REPL) — прежняя default-ветка.
+- Web: `GET /api/blogs` отдаёт `stylePreset`; `PATCH /api/blogs/[slug]`
+  принимает его (zod `z.enum(['default','antonov'])`); `/api/automation`
+  прокидывает пресет в правила; селектор «пресет стиля» в карточке каждого
+  правила на `/automation`.
+- Удалён web-хак `applyAntonovStyle` (#56): второй LLM-проход, переписывавший
+  готовый пост «Антоновайзером» для захардкоженного `lookatfacts` после того,
+  как PostWriter уже писал тем же пресетом — двойная стилизация и двойная
+  стоимость. Пресет стал единственным источником стиля; `STYLE_SYSTEM_PROMPT`
+  остался для независимых потребителей (`/style/rewrite`, `/antonov/*`,
+  `auto-drafts --style`).
+- Description на `/automation` переписан под новый механизм (#65): «Стиль
+  задаётся пресетом блога ниже; пресет Антонова — один из вариантов».
+
+**Риски/ограничения:** пресет применяется только там, где `write()` вызывается
+с `blogId` (автоматизация, CLI news); REPL-демо сознательно вне пресета.
+Fallback-поведение изменилось: хак молча возвращал оригинал при сбое LLM,
+теперь сбой генерации роняет run правила.
+
+**Проверки:** challenge — `stylePreset.test.ts`, `db.test.ts`
+(seed/update+reopen/легаси-миграция), `postWriter.test.ts` (antonov/default);
+web — `automation-route.spec.ts` проверяет `stylePreset`; typecheck обоих
+пакетов чистый; validation (code-reviewer + test-engineer) — PASS.
+
+**Код:** `challenge/src/core/{stylePreset,db}.ts`,
+`challenge/src/core/agents/postWriter.ts`,
+`web/lib/server/automation-service.ts`, `web/app/automation/page.tsx`,
+`web/app/api/{blogs,automation}/**`, `web/lib/shared/forms.ts`.
+
+---
+
+## Feature: входящие webhooks — публичный приём событий с HMAC
+**Дата:** 2026-10-24. Issues #84, #62 (rate-limit), #64 (тесты bypass).
+
+**Что сделано:**
+- `challenge/src/core/inboundWebhooks.ts` (новый): таблица `inbound_hooks`,
+  `generateInboundSecret`, `InboundHookDb` (create/list/get/delete — секрет
+  возвращается только при create), `handleInboundEvent` с двумя целями:
+  `notification` (центр уведомлений) и `todo`.
+- Публичный приём: `POST /api/integrations/inbound/<id>` — HMAC-подпись в
+  заголовке `x-artel-signature`, вычисляется по сырому телу ДО `JSON.parse`;
+  404 (нет хука) / 401 (подпись) / 400 (тело/схема). Управление хуками — под
+  session-auth: `GET /api/integrations/inbound` (список без секретов), `POST`
+  (create, секрет показывается один раз), `DELETE /<id>`.
+- Middleware-bypass строго `POST` + числовой id: другие методы и пути
+  управления хуками идут через обычную авторизацию.
+- Rate-limit на публичный POST (#62): in-memory fixed-window — 30 неудачных
+  попыток (400/401/404) за 5 минут → `429` + `Retry-After`; успешная подпись
+  сбрасывает окно; состояние в `globalThis` переживает HMR dev-сервера,
+  сбрасывается рестартом.
+- Хранение: `webhooks.sqlite` — тот же файл, что у исходящих `WebhookDb`
+  (два коннекта, WAL).
+
+**Риски/ограничения:** секрет хука хранится в SQLite открытым текстом —
+осознанный компромисс (HMAC-верификация требует исходный секрет, хешировать
+нельзя), задокументирован в `docs/AUTHORIZATION.md`; митигации — loopback-БД,
+`.data/` вне git, секрет показывается один раз, ротация = DELETE + новый хук,
+rate-limit.
+
+**Проверки:** core `inboundWebhooks.test.ts`; web
+`inbound-webhooks-route.spec.ts` — 13 тестов (подпись/ошибки + 3 rate-limit:
+429, новое окно после паузы, сброс успехом); `middleware.spec.ts` —
+bypass-ветки; на момент #62 web suite — 54 файла / 393 теста зелёные.
+
+**Код:** `challenge/src/core/inboundWebhooks{,.test}.ts`,
+`web/app/api/integrations/inbound/**`, `web/middleware.ts`,
+`web/app/integrations/page.tsx`, `web/lib/shared/forms.ts`,
+`docs/AUTHORIZATION.md`.
+
+---
+
+## Feature: браузерные уведомления — opt-in поверх колокольчика
+**Дата:** 2026-10-24. Issue #85; тесты футера — #64.
+
+**Что сделано:**
+- `web/app/components/browserNotify.ts` (новый) — хук
+  `useBrowserNotifications`: Notification API без Web Push — работает, только
+  пока открыта вкладка. Поллинг `/api/notifications?unread=1` раз в 60 с при
+  видимой вкладке; opt-in — тумблер в дропдауне колокольчика (`NotificationBell`)
+  с честным текстом при `permission=denied` и без футера, если API нет; маркер
+  последнего показанного id в `localStorage` (`browserNotify:enabled`, lastId);
+  первый полл засевает маркер, чтобы не показать лавину старых; клик по
+  уведомлению фокусит окно; тихая деградация.
+- Контракт `/api/notifications` не менялся — `?unread=1` уже поддерживался.
+
+**Проверки:** `browser-notify.spec.tsx` — 5 тестов хука (seed-полл, показ
+новых, клик, denied, нет API); `notification-bell.spec.tsx` — 4 ветки opt-in
+футера (#64); web suite зелёный.
+
+**Код:** `web/app/components/{browserNotify.ts,NotificationBell.tsx}`,
+`web/test/ui/{browser-notify,notification-bell}.spec.tsx`.
+
+---
+
+## Feature: TG-команды /уровень /блоги /авто + XP за игры
+**Дата:** 2026-10-24. Issues #58, #86, #59.
+
+**Что сделано:**
+- Команды бота «Медиум»: `/уровень` — публичная (`🏆 Уровень N · X XP
+  (до уровня N+1 — Y XP, прогресс P%). 🔥 Серия: S дн. (рекорд: B дн.)`; без
+  gamification — «Геймификация недоступна»); `/блоги` и `/авто
+  on|off|status|run` — owner-only (список блогов со статусом правил; вкл/выкл
+  по slug или id; статус + последний запуск; запуск сейчас с автопубликацией
+  при `auto_publish`). Ошибки запуска redact'ятся (`<url>`, `Bearer ***`,
+  `sk-***`, кап 200 символов). `medium_level` добавлен в публичное меню
+  бота; алиасы `level`/`муровень`.
+- `challenge/src/core/tg/automationRun.ts` (новый) — core-раннер:
+  `createTgAutomationRunner()` (BlogDb + LlmClient + BlogAutomation),
+  `runBlogOnce()` — зеркало web-адаптера; профиль голоса загружается как в web —
+  `/авто run` пишет тем же голосом, что web-автоматизация того же блога.
+- XP за игры (#59): хук `awardGame` подключён в ревиле `/изобрази` —
+  «золотой шарж» → `tg_game_win` (+15), угадавший настоящую →
+  `tg_game_play` (+2), `ref = improv:<chatId>:<userId>`; сбой sqlite не срывает
+  ревил. События и очки уже были в реестре — начисление теперь живое.
+
+**Проверки:** `botAutomation.test.ts` — 8/8 (блоги, авто on/off/status/run,
+redact, throw-пути); `bot.test.ts` — dispatch owner/не-owner + сквозной раунд
+improv с реальным temp-sqlite (`tg_game_win` + `tg_game_play`, XP 17 за раунд);
+`pnpm --filter challenge test` — 224/224; validation — PASS.
+
+**Код:** `challenge/src/core/tg/{bot,botCommands,botAutomation,automationRun,botImprov}.ts`
++ тесты, `challenge/src/core/gamification.ts`.
+
+---
+
+## Fix #53 — планировщик автоматизации в web-процессе (instrumentation)
+**Дата:** 2026-10-24. Issues #53, #77 (dev-фикс).
+
+**Что сделано:**
+- `web/lib/server/automation-scheduler.ts` (новый) — `AutomationScheduler`
+  (server-only, DI botQueue-стиль): тик 60 с, reentrant-guard (пока in-flight
+  `runDue` не завершился, тики пропускаются), `stop()` снимает таймер и
+  дожидается in-flight через инжектируемую `sleep`; ошибка тика уходит в
+  `onError` — цикл продолжается; повторный `start()` — no-op.
+- `web/instrumentation.ts` (новый) — `register()`: no-op вне nodejs-runtime
+  или без `AUTOMATION_ENABLED=1`; dynamic import server-only модулей
+  (edge-сборка их не тянет); `SIGTERM`/`SIGINT` → graceful stop; ошибка старта
+  логируется без падения процесса.
+- Попутный фикс #77: в dev Next собирал edge-вариант instrumentation
+  (middleware был edge) → 500 на всех страницах (`Module not found: 'path'`).
+  `middleware.ts` — `runtime: 'nodejs'` внутри `config` (топ-левел export
+  middleware игнорирует); `next.config.ts` — alias
+  `instrumentation.ts → edge-register-stub.ts` (пустой `register()`) для
+  edge-компилятора в dev.
+
+**Риски/ограничения:** автоматизация выполняется, пока запущен web-процесс
+(внешнего cron нет); планировщик по умолчанию выключен — включается
+`AUTOMATION_ENABLED=1`; Turbopack-dev alias webpack-конфика не применяет
+(дефолт 15.5 — webpack).
+
+**Проверки:** `automation-scheduler.spec.ts` — 6 тестов (тик + лог старта,
+перекрытие in-flight, stop ждёт in-flight, stop-до-start безопасен, нет тиков
+после stop, reject → onError); dev-smoke с `AUTOMATION_ENABLED=1`:
+`[automation-scheduler] started (tickMs=60000)`, страницы 200, auth-гейт 302,
+без флага планировщик не стартует; web suite — 52 файла / 378 тестов; 
+validation — PASS.
+
+**Код:** `web/lib/server/automation-scheduler.ts`, `web/instrumentation.ts`,
+`web/edge-register-stub.ts`, `web/middleware.ts`, `web/next.config.ts`,
+`web/test/unit/automation-scheduler.spec.ts`.
+
+---
+
+## Android: ребрендинг «Печь» + Fix #61 — levelProgress как доля 0..1
+**Дата:** 2026-10-24. Issues #67, #61; контракт доли — #54.
+
+**Что сделано:**
+- Ребрендинг «Печь» (#67): тема-токены — палитра Graphite/Violet/Lime/Flame →
+  Oven/Tomato/Basil/Cheese (тёплая пиццерийная айдентика: тёмная тема — тёплый
+  графит, светлая — сливочная бумага), ремап `colorScheme`
+  (+`tertiaryContainer` в обеих темах), новая форма `ArtelShapes.hero`
+  (асимметричный «кусок пиццы», 32/32/32/12dp); анимации в `Common.kt` —
+  `rememberPressScale` (springy press), `HeroTile` (bento-плитка с
+  hairline-бордером), `ShimmerBlock`/`ShimmerLoadingState` (shimmer-скелетон
+  вместо спиннера); адаптированы корень и 8 экранов. Логики нет — чистый UI.
+- Fix #61: сервер отдаёт `levelProgress` как долю 0..1 (контракт #54), клиент
+  объявлял поле как `Int` и повторно делил на `nextLevelXp` — кольцо прогресса
+  на дашборде почти всегда показывало ~0. `ApiModels.kt`:
+  `levelProgress: Double`; `DashboardScreen.kt`:
+  `progress = levelProgress.toFloat().coerceIn(0f, 1f)`, деление убрано.
+  Текст `"$xp / $nextLevelXp XP"` не тронут — он из `Int`-полей.
+
+**Риски/ограничения:** Kotlin-тестов в проекте нет — проверка сборкой и
+валидацией; прочие правки Android в батче — UI-полировка без логики.
+
+**Проверки:** `:app:assembleDebug` — BUILD SUCCESSFUL (Gradle 8.13, JDK 21,
+APK 17.4 MB); серверный контракт пинится тестом
+`levelProgress >= 0 && <= 1` (`gamification.test.ts`); validation #61
+(code-reviewer + test-engineer) — PASS.
+
+**Код:** `android/app/src/main/java/ru/memo7/artel/ui/theme/{Color,Theme}.kt`,
+`android/.../ui/components/Common.kt`, `android/.../ui/ArtelRoot.kt` + экраны,
+`android/.../data/api/ApiModels.kt`,
+`android/.../ui/screens/dashboard/DashboardScreen.kt`.

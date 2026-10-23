@@ -1,5 +1,7 @@
-// Корневой layout. next-themes: defaultTheme="light" (enableSystem=false) — светлая
-// админка по умолчанию, переключатель ThemeToggle меняет класс на <html> (dark/light).
+// Корневой layout. next-themes: 4 палитры (dark/light/sepia/neon) + режим system
+// (prefers-color-scheme); дефолты владеет ThemeProvider (палитры — lib/shared/theme,
+// значения цветов — globals.css). Класс темы ставится на <html> (в т.ч. анти-FOUC
+// скриптом до первого кадра).
 // Editorial-каркас: Header (Nav) сверху, main flex-1, Footer снизу (flex-col min-h-screen).
 // Admin-auth (день 36): гость — урезанный хром (Nav без core-ссылок/статуса модели,
 // БЕЗ Sidebar/Footer — те светят все защищённые маршруты); админ — полный каркас.
@@ -58,14 +60,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   return (
     <html lang="ru" suppressHydrationWarning className={`${manrope.variable} ${plexMono.variable} ${unbounded.variable}`}>
       <body className="min-h-screen bg-bg font-sans text-ink antialiased">
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="light"
-          themes={['dark', 'light']}
-          enableSystem={false}
-          disableTransitionOnChange
-          nonce={nonce}
-        >
+        <ThemeProvider nonce={nonce}>
           <ToastProvider>
             <div className="flex min-h-screen flex-col">
               <Nav isAdmin={isAdmin} />

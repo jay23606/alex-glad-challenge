@@ -301,12 +301,14 @@ export const digestGenerateSchema = z.object({
 export type DigestGenerateInput = z.infer<typeof digestGenerateSchema>;
 
 // PATCH /api/blogs/[slug] — настройка блога (имя, профиль голоса, TG-чат,
-// RSS-источники). profile: имя из /chat-профилей или null (сброс). sources:
-// массив http(s)-URL (≤20); [] сбрасывает на дефолтные фиды (null в БД).
+// RSS-источники, пресет стиля). profile: имя из /chat-профилей или null (сброс).
+// sources: массив http(s)-URL (≤20); [] сбрасывает на дефолтные фиды (null в БД).
+// stylePreset: значения синхронны с core stylePreset.ts (shared не импортирует core).
 export const blogPatchSchema = z.object({
   name: z.string().trim().min(1, 'Имя обязательно').max(120).optional(),
   profile: z.string().trim().max(100).nullable().optional(),
   tgChatId: z.string().trim().max(100).nullable().optional(),
+  stylePreset: z.enum(['default', 'antonov']).optional(),
   sources: z
     .array(
       z
@@ -474,3 +476,121 @@ export const tokenEstimateSchema = z.object({
     .optional(),
 });
 export type TokenEstimateInput = z.infer<typeof tokenEstimateSchema>;
+
+// --- Product: workspace (проекты/папки/элементы) ---
+
+export const workspaceProjectSchema = z.object({
+  name: z.string().trim().min(1, 'Название обязательно').max(120),
+  description: z.string().trim().max(1000).optional(),
+  color: z.string().trim().max(20).optional(),
+});
+export type WorkspaceProjectInput = z.infer<typeof workspaceProjectSchema>;
+
+export const workspaceProjectPatchSchema = workspaceProjectSchema
+  .partial()
+  .extend({ status: z.enum(['active', 'archived']).optional() });
+export type WorkspaceProjectPatchInput = z.infer<typeof workspaceProjectPatchSchema>;
+
+export const workspaceFolderSchema = z.object({
+  projectId: z.number().int().positive(),
+  name: z.string().trim().min(1).max(120),
+  parentId: z.number().int().positive().nullable().optional(),
+});
+export type WorkspaceFolderInput = z.infer<typeof workspaceFolderSchema>;
+
+export const workspaceItemSchema = z.object({
+  projectId: z.number().int().positive(),
+  folderId: z.number().int().positive().nullable().optional(),
+  kind: z.enum(['note', 'task', 'link']).optional(),
+  title: z.string().trim().min(1, 'Заголовок обязателен').max(500),
+  body: z.string().trim().max(20000).optional(),
+  url: z.string().trim().max(2000).optional(),
+  dueAt: z.string().trim().max(40).optional(),
+});
+export type WorkspaceItemInput = z.infer<typeof workspaceItemSchema>;
+
+export const workspaceItemPatchSchema = z.object({
+  id: z.number().int().positive(),
+  done: z.boolean().optional(),
+  title: z.string().trim().min(1).max(500).optional(),
+  body: z.string().trim().max(20000).optional(),
+  dueAt: z.string().trim().max(40).nullable().optional(),
+});
+export type WorkspaceItemPatchInput = z.infer<typeof workspaceItemPatchSchema>;
+
+// --- Product: уведомления ---
+
+export const notificationActionSchema = z.object({
+  action: z.enum(['markAllRead', 'markRead']),
+  id: z.number().int().positive().optional(),
+});
+export type NotificationActionInput = z.infer<typeof notificationActionSchema>;
+
+// --- Product: автоматизация ---
+
+export const automationConfigureSchema = z.object({
+  action: z.literal('configure'),
+  blogId: z.number().int().positive(),
+  enabled: z.boolean().optional(),
+  intervalMinutes: z.number().int().min(5).optional(),
+  autoPublish: z.boolean().optional(),
+});
+export type AutomationConfigureInput = z.infer<typeof automationConfigureSchema>;
+
+export const automationRunSchema = z.object({
+  action: z.literal('run'),
+  blogId: z.number().int().positive(),
+});
+export type AutomationRunInput = z.infer<typeof automationRunSchema>;
+
+// --- Product: интеграции (webhooks) ---
+
+export const webhookSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  url: z.string().trim().min(1).max(2000),
+  secret: z.string().max(200).optional(),
+  events: z
+    .array(z.enum(['post_published', 'todo_completed', 'automation_run', 'notification']))
+    .max(20)
+    .optional(),
+});
+export type WebhookInputSchema = z.infer<typeof webhookSchema>;
+
+// Входящие webhooks: POST /api/integrations/inbound — создать хук (секрет генерит сервер).
+export const inboundHookCreateSchema = z.object({
+  name: z.string().trim().min(1, 'Название обязательно').max(120),
+  target: z.enum(['notification', 'todo']),
+});
+export type InboundHookCreateInput = z.infer<typeof inboundHookCreateSchema>;
+
+// POST /api/integrations/inbound/[id] — событие от внешнего сервиса (публичный роут,
+// авторизация — HMAC-подпись сырого тела, не сессия). Границы защищают от гигантских тел.
+export const inboundEventSchema = z.object({
+  title: z.string().trim().min(1, 'title обязателен').max(200),
+  body: z.string().trim().max(2000).optional(),
+  href: z.string().trim().max(500).optional(),
+});
+export type InboundEventInput = z.infer<typeof inboundEventSchema>;
+
+// --- Product: поддержка ---
+
+export const supportTicketSchema = z.object({
+  subject: z.string().trim().min(1, 'Тема обязательна').max(200),
+  body: z.string().trim().min(1, 'Опишите проблему').max(5000),
+  contact: z.string().trim().max(200).optional(),
+});
+export type SupportTicketInput = z.infer<typeof supportTicketSchema>;
+
+// --- Product: ИИ-помощник ---
+
+export const assistantSchema = z.object({
+  message: z.string().trim().min(1, 'Вопрос не может быть пустым').max(2000),
+});
+export type AssistantInput = z.infer<typeof assistantSchema>;
+
+// --- Product: календарь (sync) ---
+
+export const calendarSyncSchema = z.object({
+  days: z.number().int().min(1).max(90).optional(),
+});
+export type CalendarSyncInput = z.infer<typeof calendarSyncSchema>;

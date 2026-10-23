@@ -1,0 +1,194 @@
+package ru.memo7.artel.data
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import retrofit2.HttpException
+import ru.memo7.artel.core.network.ApiError
+import ru.memo7.artel.core.network.ApiFactory
+import ru.memo7.artel.core.network.ApiResult
+import ru.memo7.artel.data.api.ArtelApi
+import ru.memo7.artel.data.api.AssistantRequest
+import ru.memo7.artel.data.api.AssistantResponse
+import ru.memo7.artel.data.api.AutomationConfigureRequest
+import ru.memo7.artel.data.api.AutomationResponse
+import ru.memo7.artel.data.api.AutomationRunRequest
+import ru.memo7.artel.data.api.AutomationRunResponse
+import ru.memo7.artel.data.api.BootstrapResponse
+import ru.memo7.artel.data.api.CalendarResponse
+import ru.memo7.artel.data.api.CalendarSyncResponse
+import ru.memo7.artel.data.api.CreateItemRequest
+import ru.memo7.artel.data.api.CreateProjectRequest
+import ru.memo7.artel.data.api.CreateTicketRequest
+import ru.memo7.artel.data.api.CreatedIdResponse
+import ru.memo7.artel.data.api.ErrorResponse
+import ru.memo7.artel.data.api.FaqResponse
+import ru.memo7.artel.data.api.ItemsResponse
+import ru.memo7.artel.data.api.NotificationActionRequest
+import ru.memo7.artel.data.api.NotificationsResponse
+import ru.memo7.artel.data.api.OkResponse
+import ru.memo7.artel.data.api.PatchItemRequest
+import ru.memo7.artel.data.api.ProjectsResponse
+
+/**
+ * Single repository over the web API. Resolves the Retrofit client from the
+ * credentials currently stored in DataStore and keeps a small in-memory cache
+ * of the last successful reads so screens can paint instantly on re-entry.
+ */
+class ArtelRepository(private val store: CredentialsStore) {
+
+    @Volatile private var apiHolder: Pair<Credentials, ArtelApi>? = null
+
+    /** Last successful payloads, keyed by endpoint. Invalidated on writes. */
+    @Volatile var cachedBootstrap: BootstrapResponse? = null
+        private set
+    @Volatile var cachedProjects: ProjectsResponse? = null
+        private set
+    @Volatile var cachedNotifications: NotificationsResponse? = null
+        private set
+    @Volatile var cachedAutomation: AutomationResponse? = null
+        private set
+    @Volatile var cachedCalendar: CalendarResponse? = null
+        private set
+
+    private suspend fun api(): ArtelApi {
+        val credentials = store.settings.first().credentials
+            ?: throw ApiError.BadResponse("Нет сохранённого подключения к серверу")
+        apiHolder?.let { (known, api) -> if (known == credentials) return api }
+        val fresh = ApiFactory.create(credentials)
+        apiHolder = credentials to fresh
+        return fresh
+    }
+
+    private suspend fun <T> call(block: suspend (ArtelApi) -> T): ApiResult<T> =
+        withContext(Dispatchers.IO) {
+            try {
+                ApiResult.Success(block(api()))
+            } catch (e: HttpException) {
+                ApiResult.Failure(e.toApiError())
+            } catch (e: ApiError) {
+                ApiResult.Failure(e)
+            } catch (e: java.io.IOException) {
+                ApiResult.Failure(ApiError.Network(e))
+            } catch (e: Exception) {
+                ApiResult.Failure(ApiError.Network(e))
+            }
+        }
+
+    private fun HttpException.toApiError(): ApiError {
+        val body = try {
+            response()?.errorBody()?.string().orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
+        val message = runCatching {
+            ApiFactory.json.decodeFromString(ErrorResponse.serializer(), body).error
+        }.getOrNull()
+        return when (code()) {
+            401 -> ApiError.Unauthorized()
+            else -> ApiError.Server(code(), message ?: body.take(200))
+        }
+    }
+
+    /* ---------- Reads ---------- */
+
+    suspend fun bootstrap(): ApiResult<BootstrapResponse> = call { api ->
+        api.bootstrap().also { cachedBootstrap = it }
+    }
+
+    suspend fun projects(): ApiResult<ProjectsResponse> = call { api ->
+        api.projects().also { cachedProjects = it }
+    }
+
+    suspend fun items(projectId: Long): ApiResult<ItemsResponse> = call { api ->
+        api.items(projectId)
+    }
+
+    suspend fun notifications(): ApiResult<NotificationsResponse> = call { api ->
+        api.notifications().also { cachedNotifications = it }
+    }
+
+    suspend fun automation(): ApiResult<AutomationResponse> = call { api ->
+        api.automation().also { cachedAutomation = it }
+    }
+
+    suspend fun calendar(days: Int = 30): ApiResult<CalendarResponse> = call { api ->
+        api.calendar(days).also { cachedCalendar = it }
+    }
+
+    suspend fun faq(query: String): ApiResult<FaqResponse> = call { api ->
+        api.faq(query)
+    }
+
+    /* ---------- Writes ---------- */
+
+    suspend fun createProject(name: String, description: String?, color: String?): ApiResult<CreatedIdResponse> =
+        call { api ->
+            val response = api.createProject(CreateProjectRequest(name, description?.takeIf { it.isNotBlank() }, color))
+            requireSuccess(response, "Не удалось создать проект")
+        }
+
+    suspend fun createItem(request: CreateItemRequest): ApiResult<CreatedIdResponse> =
+        call { api ->
+            val response = api.createItem(request)
+            requireSuccess(response, "Не удалось создать запись")
+        }
+
+    suspend fun setItemDone(id: Long, done: Boolean): ApiResult<OkResponse> =
+        call { api ->
+            val response = api.patchItem(PatchItemRequest(id, done))
+            requireSuccess(response, "Не удалось обновить запись")
+        }
+
+    suspend fun markAllNotificationsRead(): ApiResult<OkResponse> =
+        call { api ->
+            val response = api.notificationAction(NotificationActionRequest(action = "markAllRead"))
+            requireSuccess(response, "Не удалось отметить уведомления")
+        }.also { result -> if (result is ApiResult.Success) cachedNotifications = null }
+
+    suspend fun runAutomation(blogId: Long): ApiResult<AutomationRunResponse> =
+        call { api ->
+            val response = api.automationAction(AutomationRunRequest(blogId = blogId))
+            requireSuccess(response, "Не удалось запустить правило")
+        }.also { cachedAutomation = null }
+
+    suspend fun configureAutomation(blogId: Long, enabled: Boolean, intervalMinutes: Int, autoPublish: Boolean): ApiResult<OkResponse> =
+        call { api ->
+            val response = api.automationConfigure(
+                AutomationConfigureRequest(blogId = blogId, enabled = enabled, intervalMinutes = intervalMinutes, autoPublish = autoPublish)
+            )
+            requireSuccess(response, "Не удалось сохранить настройки")
+        }.also { cachedAutomation = null }
+
+    suspend fun syncCalendar(): ApiResult<CalendarSyncResponse> =
+        call { api ->
+            val response = api.calendarSync()
+            requireSuccess(response, "Не удалось синхронизировать календарь")
+        }.also { cachedCalendar = null }
+
+    suspend fun askAssistant(message: String): ApiResult<AssistantResponse> = call { api ->
+        api.assistant(AssistantRequest(message))
+    }
+
+    suspend fun createTicket(subject: String, body: String, contact: String?): ApiResult<CreatedIdResponse> =
+        call { api ->
+            val response = api.createTicket(
+                CreateTicketRequest(subject, body, contact?.takeIf { it.isNotBlank() })
+            )
+            requireSuccess(response, "Не удалось создать обращение")
+        }
+
+    private fun <T> requireSuccess(response: retrofit2.Response<T>, fallback: String): T {
+        if (!response.isSuccessful) {
+            val raw = response.errorBody()?.string().orEmpty()
+            val message = runCatching {
+                ApiFactory.json.decodeFromString(ErrorResponse.serializer(), raw).error
+            }.getOrNull()
+            throw when (response.code()) {
+                401 -> ApiError.Unauthorized()
+                else -> ApiError.Server(response.code(), message ?: raw.take(200).ifBlank { fallback })
+            }
+        }
+        return response.body() ?: throw ApiError.BadResponse(fallback)
+    }
+}
