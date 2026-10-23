@@ -148,7 +148,7 @@ Ollama=`11434`. Все bind **только `127.0.0.1`**. Публично то�
 **Решение:** `bind 127.0.0.1` + reverse-proxy (Caddy рекомендуется для fresh-deploy:
 авто-TLS из Let's Encrypt, ~10 строк конфига; nginx — если уже стоит как системный
 proxy) с TLS + basic-auth (bcrypt, пароль ≥16 символов) + security-headers.
-🛑 `next start -H 0.0.0.0` / `node standalone/server.js` без `HOSTNAME=127.0.0.1`
+🛑 `next start -H 0.0.0.0` / `node web/.next/standalone/web/server.js` без `HOSTNAME=127.0.0.1`
 без reverse-proxy = **СТОП**.
 
 ---
@@ -518,13 +518,13 @@ sudo -u alexglad bash -c 'source "$HOME/.nvm/nvm.sh" && \
 
   # 2. Сборка standalone-артефакта (= next build). output:standalone уже в next.config.ts.
   pnpm --filter web build'
-# Артефакт → web/.next/ + web/.next/standalone/server.js
+# Артефакт → web/.next/ + web/.next/standalone/web/server.js
 ```
 
 **Verify после сборки:**
 ```bash
 # 1. standalone server.js существует
-test -f web/.next/standalone/server.js && echo "OK: standalone server.js present" \
+test -f web/.next/standalone/web/server.js && echo "OK: standalone server.js present" \
   || { echo "FAIL: no standalone server.js"; exit 1; }
 
 # 2. serverExternalPackages НЕ в bundle (требуют node_modules при runtime — это ОК)
@@ -539,7 +539,7 @@ sudo -u alexglad grep -rlE "TG_SESSION|DEEPSEEK_API_KEY|OPENROUTER_API_KEY|MCP_A
   || echo "OK: client bundle чист (0 совпадений)"
 ```
 
-> **Что вошло в `web/.next/standalone/`:** `server.js` (entrypoint, читает
+> **Что вошло в `web/.next/standalone/`:** `web/server.js` (entrypoint, читает
 > `HOSTNAME`/`PORT` из env), минимальный `node_modules/` (только то, что не в bundle).
 > `serverExternalPackages` (telegram, undici, socks, https-proxy-agent, websocket,
 > fast-xml-parser, qrcode) **требуют** полного `node_modules` рядом при runtime —
