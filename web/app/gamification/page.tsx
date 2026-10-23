@@ -4,23 +4,7 @@
 import { useEffect, useState } from 'react';
 import { Card } from '../components/ui/Card';
 import { SectionHead } from '../components/ui/SectionHead';
-
-interface Achievement {
-  code: string;
-  title: string;
-  description: string;
-  unlocked: boolean;
-}
-interface View {
-  xp: number;
-  level: number;
-  levelProgress: number;
-  nextLevelXp: number;
-  streak: number;
-  bestStreak: number;
-  achievements: Achievement[];
-  events: Array<{ id: number; type: string; points: number; createdAt: string }>;
-}
+import { gamificationViewSchema, type GamificationView as View } from '../../lib/shared/forms';
 
 const EVENT_LABEL: Record<string, string> = {
   post_published: 'Публикация поста',
@@ -29,6 +13,9 @@ const EVENT_LABEL: Record<string, string> = {
   automation_run: 'Прогон автоматизации',
   assistant_used: 'Обращение к ассистенту',
   support_ticket: 'Обращение в поддержку',
+  // Игры «Изобрази» в TG (issue #59): ревил-победа и участие угадавшего.
+  tg_game_win: 'XP за игру: победа',
+  tg_game_play: 'XP за игру: участие',
 };
 
 export default function GamificationPage() {
@@ -37,13 +24,16 @@ export default function GamificationPage() {
   useEffect(() => {
     void (async () => {
       const r = await fetch('/api/gamification');
-      if (r.ok) setData((await r.json()) as View);
+      if (r.ok) {
+        const parsed = gamificationViewSchema.safeParse(await r.json());
+        if (parsed.success) setData(parsed.data);
+      }
     })();
   }, []);
 
   if (!data) return <SectionHead code="product · xp" title="Геймификация" />;
 
-  const pct = Math.round(data.levelProgress * 100);
+  const pct = Math.round(data.stats.levelProgress * 100);
 
   return (
     <div className="space-y-6">
@@ -52,19 +42,19 @@ export default function GamificationPage() {
       <div className="grid gap-4 sm:grid-cols-3">
         <Card label="Уровень">
           <div className="flex items-baseline gap-2">
-            <span className="text-4xl font-semibold text-ink">{data.level}</span>
+            <span className="text-4xl font-semibold text-ink">{data.stats.level}</span>
             <span className="text-sm text-dim">уровень</span>
           </div>
           <div className="mt-3 h-2 overflow-hidden rounded-full bg-surface-2">
             <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${pct}%` }} />
           </div>
           <p className="mt-2 text-xs text-dim">
-            {data.xp} XP · до {data.nextLevelXp} XP ({pct}%)
+            {data.stats.xp} XP · до {data.stats.nextLevelXp} XP ({pct}%)
           </p>
         </Card>
         <Card label="Серия">
-          <p className="text-3xl font-semibold text-ink">{data.streak} <span className="text-sm text-dim">дней подряд</span></p>
-          <p className="mt-1 text-xs text-dim">рекорд: {data.bestStreak} дней</p>
+          <p className="text-3xl font-semibold text-ink">{data.stats.streak} <span className="text-sm text-dim">дней подряд</span></p>
+          <p className="mt-1 text-xs text-dim">рекорд: {data.stats.bestStreak} дней</p>
         </Card>
         <Card label="Достижения">
           <p className="text-3xl font-semibold text-ink">

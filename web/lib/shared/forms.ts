@@ -594,3 +594,37 @@ export const calendarSyncSchema = z.object({
   days: z.number().int().min(1).max(90).optional(),
 });
 export type CalendarSyncInput = z.infer<typeof calendarSyncSchema>;
+
+// --- Product: геймификация ---
+
+// Ответ GET /api/gamification (docs/api-contracts.md): xp/level/прогресс
+// вложены в `stats`, достижения и журнал — top-level. Плоский View + слепой
+// каст на /gamification прятали рассинхрон (issue #79) — ответ парсится по
+// схеме на границе. levelProgress — ДОЛЯ 0..1, не процент (клиент ×100 сам).
+export const gamificationViewSchema = z.object({
+  stats: z.object({
+    xp: z.number(),
+    level: z.number(),
+    levelProgress: z.number(),
+    nextLevelXp: z.number(),
+    streak: z.number(),
+    bestStreak: z.number(),
+  }),
+  achievements: z.array(
+    z.object({
+      code: z.string(),
+      title: z.string(),
+      description: z.string(),
+      unlocked: z.boolean(),
+    }),
+  ),
+  events: z.array(
+    z.object({
+      id: z.number(),
+      type: z.string(),
+      points: z.number(),
+      createdAt: z.string(),
+    }),
+  ),
+});
+export type GamificationView = z.infer<typeof gamificationViewSchema>;
