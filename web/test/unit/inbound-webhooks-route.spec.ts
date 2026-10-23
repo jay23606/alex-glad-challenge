@@ -61,7 +61,7 @@ let DELETE_HOOK: (req: NextRequest, ctx: { params: Promise<{ id: string }> }) =>
 let GET_LIST: (req: NextRequest) => Promise<Response>;
 let POST_CREATE: (req: NextRequest) => Promise<Response>;
 let createSessionValue: () => string;
-let signPayload: (secret: string, body: string) => string;
+let signPayload: (secret: string, body: string | Uint8Array) => string;
 
 beforeAll(async () => {
   const idRoute = await import('../../app/api/integrations/inbound/[id]/route');
@@ -98,7 +98,7 @@ function failState(): { fails: number; resetAt: number } {
 
 function eventReq(
   hookId: number,
-  rawBody: string,
+  rawBody: string | Uint8Array,
   signature: string | null,
 ): { req: NextRequest; ctx: { params: Promise<{ id: string }> } } {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
@@ -107,7 +107,9 @@ function eventReq(
     req: new NextRequest(`http://127.0.0.1:3000/api/integrations/inbound/${hookId}`, {
       method: 'POST',
       headers,
-      body: rawBody,
+      // Копия в собственный ArrayBuffer: BodyInit pin-ит ArrayBuffer-бэкинг,
+      // а Buffer может сидеть в пуле со смещением; байты те же.
+      body: typeof rawBody === 'string' ? rawBody : new Uint8Array(rawBody).buffer,
     }),
     ctx: { params: Promise.resolve({ id: String(hookId) }) },
   };
@@ -223,6 +225,56 @@ describe('POST /api/integrations/inbound/[id] (приём события, HMAC �
   });
 });
 
+describe('POST [id]: подпись по сырым байтам и обрыв чтения (issue #98)', () => {
+  // BOM-префикс: подпись по байтам с EF BB BF. Старый путь (декодирование до
+  // HMAC) резал BOM → 401; теперь HMAC считается по байтам до декодирования.
+  it('BOM-префикс: подпись по байтам проходит → 200, событие создаётся', async () => {
+    mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
+    const raw = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('{"title":"bom ok"}')]);
+    const { req, ctx } = eventReq(HOOK_NOTIFICATION.id, raw, signPayload(HOOK_NOTIFICATION.secret, raw));
+    const res = await POST_RECEIVE(req, ctx);
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ ok: true, id: 42 });
+    expect(mocks.notificationAdd).toHaveBeenCalledTimes(1);
+  });
+
+  // Битая UTF-8 последовательность (0xFF): декодирование до HMAC подменяло её
+  // на U+FFFD → 401. По байтам подпись проходит; декодирование после проверки
+  // даёт U+FFFD внутри строки — JSON валиден, событие создаётся.
+  it('invalid UTF-8 в теле: подпись по байтам проходит (не 401)', async () => {
+    mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
+    const raw = Buffer.concat([Buffer.from('{"title":"a'), Buffer.from([0xff]), Buffer.from('"}')]);
+    const { req, ctx } = eventReq(HOOK_NOTIFICATION.id, raw, signPayload(HOOK_NOTIFICATION.secret, raw));
+    const res = await POST_RECEIVE(req, ctx);
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ ok: true, id: 42 });
+    expect(mocks.notificationAdd).toHaveBeenCalledTimes(1);
+  });
+
+  // reader.read() reject (обрыв клиента) → 400, не 500; cancel/release не роняют
+  // хендлер. Отказ до обращения к БД; счётчик не двигает — это не подбор подписи.
+  it('обрыв чтения (read reject) → 400, БД не тронута, rate-счётчик не двигается', async () => {
+    mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.error(new Error('client gone'));
+      },
+    });
+    const req = new NextRequest(`http://127.0.0.1:3000/api/integrations/inbound/${HOOK_NOTIFICATION.id}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-artel-signature': 'deadbeef' },
+      body,
+      duplex: 'half',
+    });
+    const res = await POST_RECEIVE(req, { params: Promise.resolve({ id: String(HOOK_NOTIFICATION.id) }) });
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ error: 'request aborted' });
+    expect(mocks.getHook).not.toHaveBeenCalled();
+    expect(mocks.notificationAdd).not.toHaveBeenCalled();
+    expect(failState().fails).toBe(0);
+  });
+});
+
 describe('POST [id]: лимит размера тела — 413 до HMAC (issue #96, cap 64 KiB)', () => {
   // Дублирует MAX_BODY_BYTES роута намеренно: лимит зафиксирован тестом.
   const OVER = 64 * 1024 + 1;
@@ -278,6 +330,37 @@ describe('POST [id]: лимит размера тела — 413 до HMAC (issue
     expect(pulls()).toBeLessThan(4); // вытянуто ≤ 2-3 чанков: стрим не вычитан до конца
     expect(mocks.notificationAdd).not.toHaveBeenCalled();
     expect(mocks.todoAdd).not.toHaveBeenCalled();
+    expect(failState().fails).toBe(0);
+  });
+
+  // Аудит #98 (HIGH): переполнение мелкими чанками — 100×700 B ≈ 70 KiB > капа.
+  // Память фиксирована одним преаллоцированным Buffer(MAX): количество чанков
+  // на heap не влияет; отказ приходит до БД/HMAC.
+  it('переполнение мелкими чанками (100×700 B) → 413, чтение остановлено досрочно', async () => {
+    mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
+    let cancelled = false;
+    let pulls = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new Uint8Array(700));
+        if (pulls >= 100) controller.close();
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const req = new NextRequest(`http://127.0.0.1:3000/api/integrations/inbound/${HOOK_NOTIFICATION.id}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-artel-signature': 'deadbeef' },
+      body,
+      duplex: 'half',
+    });
+    const res = await POST_RECEIVE(req, { params: Promise.resolve({ id: String(HOOK_NOTIFICATION.id) }) });
+    expect(res.status).toBe(413);
+    expect(cancelled).toBe(true); // cancel при переполнении: кап не уводит в 400
+    expect(pulls).toBeLessThan(100); // кап сработал до исчерпания продюсера (~94 чанка)
+    expect(mocks.getHook).not.toHaveBeenCalled();
     expect(failState().fails).toBe(0);
   });
 

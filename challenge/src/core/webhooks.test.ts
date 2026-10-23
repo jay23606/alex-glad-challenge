@@ -26,25 +26,54 @@ test('webhooks: подпись и проверка HMAC', () => {
   assert.equal(verifySignature('secret', '{"a":1}', sig), true);
   assert.equal(verifySignature('other', '{"a":1}', sig), false);
   assert.equal(verifySignature('secret', '{"a":2}', sig), false);
+  // Fail-closed (аудит #98): пустой секрет (DEFAULT '' в схеме) не аутентифицирует.
+  assert.equal(verifySignature('', '{"a":1}', signPayload('', '{"a":1}')), false);
+});
+
+test('webhooks: подпись по сырым байтам (Uint8Array) — BOM и битый UTF-8 (issue #98)', () => {
+  const bomBody = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('{"a":1}')]);
+  const bomSig = signPayload('secret', bomBody);
+  assert.equal(verifySignature('secret', bomBody, bomSig), true);
+  // Строка без BOM — другие байты: подпись байт с BOM не подходит.
+  assert.equal(verifySignature('secret', '{"a":1}', bomSig), false);
+  const brokenBody = Buffer.concat([Buffer.from('{"a":"'), Buffer.from([0xff]), Buffer.from('"}')]);
+  const brokenSig = signPayload('secret', brokenBody);
+  assert.equal(verifySignature('secret', brokenBody, brokenSig), true);
+  // Декодированная строка (0xFF → U+FFFD) — другие байты.
+  const decoded = new TextDecoder().decode(brokenBody);
+  assert.equal(verifySignature('secret', decoded, brokenSig), false);
 });
 
 test('webhooks: deliverEvent доставляет только подписанным на событие', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'webhook-'));
   try {
     const db = new WebhookDb(path.join(dir, 'w.sqlite'));
-    db.create({ name: 'a', url: 'http://127.0.0.1:9000/a', events: ['post_published'] });
+    db.create({ name: 'a', url: 'http://127.0.0.1:9000/a', events: ['post_published'], secret: 'outbound-secret-a' });
     db.create({ name: 'b', url: 'http://127.0.0.1:9000/b', events: ['todo_completed'], enabled: false });
     db.create({ name: 'c', url: 'http://127.0.0.1:9000/c', events: ['automation_run'] });
 
     const received: string[] = [];
-    const fetchFn = (async (url: string | URL | Request) => {
+    const captured: Array<{ body: string; signature: string | undefined }> = [];
+    const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
       received.push(String(url));
+      captured.push({
+        body: typeof init?.body === 'string' ? init.body : '',
+        signature: (init?.headers as Record<string, string> | undefined)?.['x-artel-signature'],
+      });
       return new Response('ok', { status: 200 });
     }) as typeof fetch;
 
     const delivered = await deliverEvent(db, 'post_published', { id: 1 }, { fetchFn });
     assert.equal(delivered, 1);
     assert.deepEqual(received, ['http://127.0.0.1:9000/a']);
+
+    // Контракт outbound→inbound (issue #98): подпись доставленного тела валидна
+    // при проверке по байтам — тем же путём, что и inbound-роут.
+    assert.ok(captured[0]?.signature);
+    assert.equal(
+      verifySignature('outbound-secret-a', new TextEncoder().encode(captured[0].body), captured[0].signature),
+      true,
+    );
 
     const deliveries = db.listDeliveries();
     assert.equal(deliveries.length, 1);

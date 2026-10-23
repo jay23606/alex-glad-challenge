@@ -84,11 +84,18 @@ export function validateWebhookUrl(raw: string): string {
   return url.toString();
 }
 
-export function signPayload(secret: string, body: string): string {
+// body — байты, которые реально ушли в сеть (Uint8Array/Buffer), либо строка:
+// строка кодируется в UTF-8, поэтому эквивалентна байтам только для валидного
+// UTF-8 без BOM. Отправитель с нестандартными байтами (BOM, битая кодировка)
+// подписывает сырые байты — сервер обязан проверять те же байты (issue #98).
+export function signPayload(secret: string, body: string | Uint8Array): string {
   return createHmac('sha256', secret).update(body).digest('hex');
 }
 
-export function verifySignature(secret: string, body: string, signature: string): boolean {
+export function verifySignature(secret: string, body: string | Uint8Array, signature: string): boolean {
+  // Fail-closed: пустой секрет (DEFAULT '' в схеме БД) не аутентифицирует —
+  // иначе HMAC('', body) валиден, и хук без секрета принимал бы подделки.
+  if (secret === '') return false;
   const expected = signPayload(secret, body);
   const a = Buffer.from(expected);
   const b = Buffer.from(signature);

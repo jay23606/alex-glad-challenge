@@ -1,7 +1,8 @@
 // /api/integrations/inbound/[id] — приём события (POST, публичный: HMAC-подпись
 // сырого тела вместо сессии; путь открыт в middleware) + удаление хука (DELETE, auth).
 // Подпись — hex HMAC-SHA256(secret, rawBody) в заголовке x-artel-signature
-// (тот же контракт, что у исходящих webhooks).
+// (тот же контракт, что у исходящих webhooks); rawBody — сырые байты запроса,
+// декодирование в UTF-8 для JSON.parse — только после проверки (issue #98).
 //
 // Rate-limit POST: глобальный in-memory fixed-window, 30 неудачных попыток (401/404/400)
 // за 5 минут → 429 + Retry-After до конца окна. Успешная подпись (доказательство
@@ -52,27 +53,47 @@ function registerFail(): void {
   state.fails += 1;
 }
 
-// Чтение тела с капом; null — лимит превышен. Сначала дешёвый precheck по
-// заголовку Content-Length (отказ до чтения потока), затем поток читается
-// чанками: при превышении лимита чтение прекращается (reader.cancel()) —
-// chunked-запрос без Content-Length не может буферизоваться бесконечно.
-async function readBodyCapped(req: NextRequest): Promise<string | null> {
+// Чтение тела с капом; ok:false too-large — лимит превышен, aborted — поток
+// сорвался (обрыв клиента → 400, а не 500; это не попытка подбора подписи,
+// rate-счётчик не двигает). Сначала дешёвый precheck по заголовку
+// Content-Length (отказ до чтения потока), затем поток читается чанками как
+// сырые байты: подпись считается по байтам, декодирование UTF-8 — только после
+// успешной проверки (issue #98: TextDecoder режет BOM и подменяет битые
+// последовательности, HMAC по декодированной строке не совпадает с подписью
+// отправителя). Память — один преаллоцированный буфер + курсор: O(MAX) на запрос
+// независимо от гранулярности чанков (массив чанков при chunked '1\r\nA\r\n'
+// раздувал heap в сотни раз при «64 KiB» запросе). При переполнении чтение
+// прекращается (reader.cancel()) — chunked-запрос без Content-Length не может
+// буферизоваться бесконечно.
+type BodyRead =
+  | { ok: true; body: Buffer }
+  | { ok: false; reason: 'too-large' | 'aborted' };
+
+async function readBodyCapped(req: NextRequest): Promise<BodyRead> {
   const declared = Number(req.headers.get('content-length'));
-  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return null;
-  if (!req.body) return '';
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return { ok: false, reason: 'too-large' };
+  if (!req.body) return { ok: true, body: Buffer.alloc(0) };
   const reader = req.body.getReader();
-  const decoder = new TextDecoder();
-  let bytes = 0;
-  let body = '';
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) return body + decoder.decode(); // flush хвоста многобайтовой последовательности
-    bytes += value.byteLength;
-    if (bytes > MAX_BODY_BYTES) {
-      await reader.cancel();
-      return null;
+  const buf = Buffer.allocUnsafe(MAX_BODY_BYTES);
+  let len = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return { ok: true, body: buf.subarray(0, len) };
+      if (len + value.byteLength > MAX_BODY_BYTES) {
+        await reader.cancel().catch(() => {}); // reject cancel не уводит в catch: кап остаётся 413, не 400
+        return { ok: false, reason: 'too-large' };
+      }
+      buf.set(value, len);
+      len += value.byteLength;
     }
-    body += decoder.decode(value, { stream: true });
+  } catch {
+    return { ok: false, reason: 'aborted' };
+  } finally {
+    // cancel: no-op на закрытом/оборванном потоке (ошибки игнорируем);
+    // releaseLock: чтение всегда завершено к этому моменту.
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
 }
 
@@ -95,10 +116,15 @@ export async function POST(
     return jsonError('invalid id', 400);
   }
 
-  // Сырое тело до JSON.parse — подпись считается по нему. Читается с капом:
-  // oversized → 413 до/во время чтения, до проверки подписи (issue #96).
-  const rawBody = await readBodyCapped(req);
-  if (rawBody === null) return jsonError('body too large', 413);
+  // Сырое тело до JSON.parse — подпись считается по его байтам. Читается с
+  // капом: oversized → 413 до/во время чтения, до проверки подписи (issue #96);
+  // обрыв клиента → 400 (issue #98).
+  const read = await readBodyCapped(req);
+  if (!read.ok) {
+    if (read.reason === 'aborted') return jsonError('request aborted', 400);
+    return jsonError('body too large', 413);
+  }
+  const rawBody = read.body;
   const signature = req.headers.get('x-artel-signature') ?? '';
 
   const hook = await withDb(() => getInboundHookDb().get(hookId));
@@ -111,9 +137,11 @@ export async function POST(
     return jsonError('invalid signature', 401);
   }
 
+  // Декодирование только после успешной проверки подписи: подпись — по байтам.
+  const bodyText = new TextDecoder().decode(rawBody);
   let json: unknown;
   try {
-    json = JSON.parse(rawBody) as unknown;
+    json = JSON.parse(bodyText) as unknown;
   } catch {
     registerFail();
     return jsonError('body must be valid JSON', 400);
