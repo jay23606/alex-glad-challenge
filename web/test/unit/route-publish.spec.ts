@@ -13,6 +13,24 @@ vi.mock('../../lib/server/tg-publish', () => ({
   tgRateLimit: vi.fn(),
 }));
 
+const mocks = vi.hoisted(() => ({
+  award: vi.fn(),
+  // Типизированная сигнатура: payload уведомления читается из mock.calls без cast.
+  notifyAdd: vi.fn<(input: { type: string; title: string; body: string; href: string }) => number>(),
+  deliverEvent: vi.fn(),
+}));
+
+vi.mock('../../lib/server/db', () => ({
+  getGamificationDb: vi.fn(() => ({ award: mocks.award })),
+  getNotificationDb: vi.fn(() => ({ add: mocks.notifyAdd })),
+  getWebhookDb: vi.fn(() => ({})),
+  withDb: vi.fn((fn: () => unknown) => fn()),
+}));
+
+vi.mock('../../lib/server/challenge', () => ({
+  deliverEvent: mocks.deliverEvent,
+}));
+
 let POST: (req: NextRequest) => Promise<Response>;
 let createSessionValue: () => string;
 let publishToTelegram: ReturnType<typeof vi.fn>;
@@ -37,6 +55,9 @@ beforeEach(() => {
       new Response(JSON.stringify(outcome), { status: outcome.ok ? 200 : 502 }),
   );
   tgRateLimit.mockReset().mockReturnValue({ ok: true });
+  mocks.award.mockReset();
+  mocks.notifyAdd.mockReset();
+  mocks.deliverEvent.mockReset();
 });
 
 function req(body: unknown, cookie?: string): NextRequest {
@@ -78,6 +99,85 @@ describe('POST /api/telegram/publish', () => {
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({ ok: true, messageId: 42 });
     expect(publishToTelegram).toHaveBeenCalledWith('<b>привет</b>', 'manual', undefined, 'HTML');
+  });
+
+  it('уведомление post_published: тело — чистый текст без HTML-тегов', async () => {
+    publishToTelegram.mockResolvedValue({ ok: true, messageId: 7 });
+    const res = await POST(
+      req(
+        { text: '<b>привет</b> <a href="https://t.me/ch">x</a>' },
+        `admin_session=${createSessionValue()}`,
+      ),
+    );
+
+    expect(res.status).toBe(200);
+    expect(mocks.notifyAdd).toHaveBeenCalledTimes(1);
+    expect(mocks.notifyAdd).toHaveBeenCalledWith({
+      type: 'post_published',
+      title: 'Пост опубликован',
+      body: 'привет x',
+      href: '/telegram/history',
+    });
+    expect(mocks.award).toHaveBeenCalledWith('post_published');
+    expect(mocks.deliverEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      'post_published',
+      { text: '<b>привет</b> <a href="https://t.me/ch">x</a>' },
+    );
+  });
+
+  it('уведомление post_published: длинное тело капится 160 символами и без разметки', async () => {
+    publishToTelegram.mockResolvedValue({ ok: true, messageId: 8 });
+    const text = `<i>${'слово '.repeat(60)}</i>`;
+    const res = await POST(req({ text }, `admin_session=${createSessionValue()}`));
+
+    expect(res.status).toBe(200);
+    const added = mocks.notifyAdd.mock.calls[0][0];
+    expect(added.body).not.toContain('<');
+    expect(added.body.length).toBeLessThanOrEqual(160);
+  });
+
+  it('уведомление post_published: кап ровно 160 — границы 160/161, тело = точный префикс', async () => {
+    publishToTelegram.mockResolvedValue({ ok: true, messageId: 9 });
+    const session = `admin_session=${createSessionValue()}`;
+
+    const exactly160 = 'а'.repeat(160);
+    await POST(req({ text: `<b>${exactly160}</b>` }, session));
+    const added160 = mocks.notifyAdd.mock.calls[0][0];
+    expect(added160.body).toBe(exactly160);
+    expect(added160.body.length).toBe(160);
+
+    mocks.notifyAdd.mockClear();
+    const plain161 = 'а'.repeat(161);
+    await POST(req({ text: `<b>${plain161}</b>` }, session));
+    const added161 = mocks.notifyAdd.mock.calls[0][0];
+    expect(added161.body).toBe(plain161.slice(0, 160));
+    expect(added161.body.length).toBe(160);
+  });
+
+  it('уведомление post_published: strip до slice — тег на границе 160 не оставляет обломков', async () => {
+    publishToTelegram.mockResolvedValue({ ok: true, messageId: 11 });
+    // Тег <b> пересекает позицию 160 сырой строки: при slice→strip в теле остался бы '<b'.
+    const text = `${'а'.repeat(158)}<b>хвост</b>`;
+    const res = await POST(req({ text }, `admin_session=${createSessionValue()}`));
+
+    expect(res.status).toBe(200);
+    const added = mocks.notifyAdd.mock.calls[0][0];
+    expect(added.body).toBe(`${'а'.repeat(158)}хв`);
+    expect(added.body).not.toContain('<');
+    expect(added.body).not.toContain('<b');
+  });
+
+  it('уведомление post_published: вложенные теги и сущности разворачиваются', async () => {
+    publishToTelegram.mockResolvedValue({ ok: true, messageId: 12 });
+    const session = `admin_session=${createSessionValue()}`;
+
+    await POST(req({ text: '<b><i>x</i></b>' }, session));
+    expect(mocks.notifyAdd.mock.calls[0][0].body).toBe('x');
+
+    mocks.notifyAdd.mockClear();
+    await POST(req({ text: 'a &lt; b' }, session));
+    expect(mocks.notifyAdd.mock.calls[0][0].body).toBe('a < b');
   });
 
   it('parseMode none пробрасывается', async () => {

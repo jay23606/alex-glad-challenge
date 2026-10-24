@@ -7,6 +7,7 @@ import { NextRequest } from 'next/server';
 import { createHash } from 'node:crypto';
 
 import { tgPublishSchema } from '../../../../lib/shared/forms';
+import { tgHtmlToPlain } from '../../../../lib/shared/tg-html';
 import { requireAuth, SESSION_COOKIE } from '../../../../lib/auth';
 import { publishToTelegram, tgPublishResponse, tgRateLimit } from '../../../../lib/server/tg-publish';
 import { getGamificationDb, getNotificationDb, getWebhookDb, withDb } from '../../../../lib/server/db';
@@ -58,10 +59,13 @@ export async function POST(req: NextRequest): Promise<Response> {
       getNotificationDb().add({
         type: 'post_published',
         title: 'Пост опубликован',
-        body: parsed.data.text.slice(0, 160),
+        // Тело уведомления — чистый текст: composer присылает TG-HTML, сырую
+        // разметку в /notifications не показываем (кап 160).
+        body: tgHtmlToPlain(parsed.data.text).slice(0, 160),
         href: '/telegram/history',
       });
     });
+    // Webhook-payload сознательно raw: machine-потребителям интеграций нужен полный HTML.
     void deliverEvent(getWebhookDb(), 'post_published', { text: parsed.data.text });
   }
   return tgPublishResponse(outcome);
