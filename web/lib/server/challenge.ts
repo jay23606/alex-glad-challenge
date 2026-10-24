@@ -132,6 +132,8 @@ export type { NotificationRow, NotificationInput, NotificationChannel } from '@c
 // Product: автоматизация блогов.
 export { BlogAutomation, nextRunAfter } from '@challenge/core/automation';
 export type { AutomationRuleRow, AutomationRunRow, BlogRunOutcome, AutomationRunResult } from '@challenge/core/automation';
+// Общая фабрика прогона блога (pipeline + профиль + публикация по auto_publish).
+export { createAutomationRunner } from '@challenge/core/agents/automationRun';
 // Product: календарь + Google Calendar.
 export { buildIcs, deadlineEvent } from '@challenge/core/calendar';
 export type { CalendarEvent } from '@challenge/core/calendar';

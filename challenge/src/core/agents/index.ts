@@ -12,6 +12,9 @@ export type { FactCheckResult, FactCheckIssue } from './factChecker.js';
 export { runNewsPipeline } from './pipeline.js';
 export type { PipelineResult } from './pipeline.js';
 
+export { createAutomationRunner } from './automationRun.js';
+export type { AutomationRunner, AutomationRunnerOptions, AutomationPublish } from './automationRun.js';
+
 export { fetchAllFeeds, filterRecent, toNewsRow } from './rss.js';
 export type { RssItem } from './rss.js';
 
