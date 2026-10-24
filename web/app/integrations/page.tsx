@@ -102,9 +102,12 @@ export default function IntegrationsPage() {
 
       <Card label="Новая подписка">
         <div className="space-y-2">
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Название" className={INPUT_CLASS} />
-          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/hook" className={INPUT_CLASS} />
-          <input value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="Секрет подписи (необязательно)" className={INPUT_CLASS} />
+          {/* name+URL — 2 колонки от sm, секрет — полная строка; на узких — стек (inputs инлайновые, без grid сжимаются в одну строку). */}
+          <div className="grid gap-2 sm:grid-cols-2">
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Название" className={INPUT_CLASS} />
+            <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/hook" className={INPUT_CLASS} />
+            <input value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="Секрет подписи (необязательно)" className={`${INPUT_CLASS} sm:col-span-2`} />
+          </div>
           <div className="flex flex-wrap gap-2">
             {EVENTS.map((e) => (
               <label key={e} className="flex items-center gap-1 text-xs text-dim">
