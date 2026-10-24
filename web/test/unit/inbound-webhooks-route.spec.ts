@@ -1,7 +1,8 @@
 // Unit: Route Handlers /api/integrations/inbound — управление входящими хуками
 // (GET/POST, session-auth) и приём событий POST /api/integrations/inbound/[id]
 // (публичный: HMAC-подпись вместо сессии; rate-limit — 30 неудач/хук/5 мин
-// + глобальный abuse-guard 200/5 мин, issue #103) + DELETE [id].
+// + глобальный abuse-guard 200/5 мин, issue #103; опциональный
+// x-artel-timestamp ±5 мин, issue #97) + DELETE [id].
 // db (getInboundHookDb/getNotificationDb/getTodoDb/withDb) мокается по образцу
 // rag-notes-route.spec.ts; chokepoint мокается с реальными pure-частями core
 // (handleInboundEvent/verifySignature/NotificationService — без сети и файлов).
@@ -120,9 +121,11 @@ function eventReq(
   hookId: number,
   rawBody: string | Uint8Array,
   signature: string | null,
+  timestamp?: string | null,
 ): { req: NextRequest; ctx: { params: Promise<{ id: string }> } } {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (signature !== null) headers['x-artel-signature'] = signature;
+  if (timestamp != null) headers['x-artel-timestamp'] = timestamp;
   return {
     req: new NextRequest(`http://127.0.0.1:3000/api/integrations/inbound/${hookId}`, {
       method: 'POST',
@@ -242,6 +245,62 @@ describe('POST /api/integrations/inbound/[id] (приём события, HMAC �
     const tampered = eventReq(HOOK_NOTIFICATION.id, JSON.stringify({ title: 'forged' }), sig);
     const res = await POST_RECEIVE(tampered.req, tampered.ctx);
     expect(res.status).toBe(401);
+  });
+});
+
+// #92: edge-cases валидности id. Middleware открывает bypass regex'ом /\d+/, т.е.
+// ЛЮБАЯ цифровая строка доходит до роута — гейт валидности обязан быть в роуте и
+// срабатывать ДО чтения тела и БД (400, не 404 и не hang). Граница ветки:
+// Number(id) должен быть целым > 0. Переполнение до Infinity → 400; конечное, но
+// гигантское (1e20 — целое) в 400-ветку не попадает: уходит в БД и отвечает
+// 404 «hook not found», как обычный неизвестный id.
+describe('POST [id]: граница валидности id (#92)', () => {
+  function rawIdReq(id: string): { req: NextRequest; ctx: { params: Promise<{ id: string }> } } {
+    return {
+      req: new NextRequest(`http://127.0.0.1:3000/api/integrations/inbound/${id}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+      }),
+      ctx: { params: Promise.resolve({ id }) },
+    };
+  }
+
+  it('id=0 → 400 «invalid id» до чтения тела и БД (не 404, не hang)', async () => {
+    mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
+    // Бесконечный продюсер (никогда не enqueue): если бы гейт валидности стоял
+    // после чтения тела, хендлер завис бы на этом стриме — тест упал по таймауту.
+    const req = new NextRequest('http://127.0.0.1:3000/api/integrations/inbound/0', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: new ReadableStream<Uint8Array>({ pull() {} }),
+      duplex: 'half',
+    });
+    const res = await POST_RECEIVE(req, { params: Promise.resolve({ id: '0' }) });
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ error: 'invalid id' });
+    expect(mocks.getHook).not.toHaveBeenCalled(); // не 404-ветка: до БД не дошло
+    expect(hookBudget(0).fails).toBe(0); // per-hook бюджет на id=0 не заводится
+    expect(globalBudget().fails).toBe(1); // невалидный id — чистый перебор (guard #103)
+  });
+
+  it('огромный цифровой id (Number → Infinity) → 400 до чтения тела и БД', async () => {
+    mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
+    const { req, ctx } = rawIdReq('9'.repeat(400)); // 400 цифр: Number = Infinity, regex \d+ такой путь пропускает
+    const res = await POST_RECEIVE(req, ctx);
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ error: 'invalid id' });
+    expect(mocks.getHook).not.toHaveBeenCalled();
+    expect(globalBudget().fails).toBe(1);
+  });
+
+  it('граница ветки: конечный огромный id (1e20 — целое) — не 400, а 404 из БД', async () => {
+    mocks.getHook.mockReturnValue(null);
+    const { req, ctx } = rawIdReq('100000000000000000000'); // Number(...) = 1e20 — integer > 0
+    const res = await POST_RECEIVE(req, ctx);
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toMatchObject({ error: 'hook not found' });
+    expect(mocks.getHook).toHaveBeenCalledWith(1e20); // дошло до поиска хука
+    expect(globalBudget().fails).toBe(1); // неизвестный id — тоже перебор
   });
 });
 
@@ -391,6 +450,103 @@ describe('POST [id]: лимит размера тела — 413 до HMAC (issue
     const res = await POST_RECEIVE(req, ctx);
     expect(res.status).toBe(401); // при мутации «>=» precheck дал бы 413
     expect(hookBudget(HOOK_NOTIFICATION.id).fails).toBe(1);
+  });
+});
+
+describe('POST [id]: опциональный x-artel-timestamp — replay-защита (issue #97)', () => {
+  const BODY = { title: 'replayed delivery' };
+  const raw = JSON.stringify(BODY);
+
+  // Отправители без заголовка (текущие внутренние сервисы, curl) не ломаются:
+  // контракт подписи не менялся, заголовок purely additive.
+  it('без заголовка — прежнее поведение: 200, событие создаётся', async () => {
+    mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
+    const { req, ctx } = signedReq(HOOK_NOTIFICATION, BODY);
+    const res = await POST_RECEIVE(req, ctx);
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ ok: true, id: 42 });
+    expect(mocks.notificationAdd).toHaveBeenCalledTimes(1);
+  });
+
+  it('свежий timestamp → 200, событие создаётся', async () => {
+    mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
+    const { req, ctx } = eventReq(
+      HOOK_NOTIFICATION.id, raw, signPayload(HOOK_NOTIFICATION.secret, raw), String(Date.now()),
+    );
+    const res = await POST_RECEIVE(req, ctx);
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ ok: true, id: 42 });
+    expect(mocks.notificationAdd).toHaveBeenCalledTimes(1);
+  });
+
+  // Повтор захваченной доставки через >5 мин: подпись валидна, timestamp протух
+  // → 400 до мутации; бюджет двигается, чтобы массовый повтор упирался в 429.
+  it('протухший timestamp (подпись валидна) → 400, событие не создаётся, бюджет двигается', async () => {
+    mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
+    const stale = String(Date.now() - 400_000); // > окна ±300 с, без опоры на границу
+    const { req, ctx } = eventReq(
+      HOOK_NOTIFICATION.id, raw, signPayload(HOOK_NOTIFICATION.secret, raw), stale,
+    );
+    const res = await POST_RECEIVE(req, ctx);
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ error: 'stale timestamp' });
+    expect(mocks.notificationAdd).not.toHaveBeenCalled();
+    expect(hookBudget(HOOK_NOTIFICATION.id).fails).toBe(1);
+  });
+
+  // Окно симметрично: timestamp из далёкого будущего тоже отклоняется —
+  // иначе зашитый в шаблон «свежий навсегда» ts отключал бы защиту.
+  it('timestamp из далёкого будущего → 400', async () => {
+    mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
+    const future = String(Date.now() + 400_000);
+    const { req, ctx } = eventReq(
+      HOOK_NOTIFICATION.id, raw, signPayload(HOOK_NOTIFICATION.secret, raw), future,
+    );
+    const res = await POST_RECEIVE(req, ctx);
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ error: 'stale timestamp' });
+    expect(mocks.notificationAdd).not.toHaveBeenCalled();
+  });
+
+  it('мусор в заголовке (не целое число) → 400 invalid timestamp', async () => {
+    mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
+    const { req, ctx } = eventReq(
+      HOOK_NOTIFICATION.id, raw, signPayload(HOOK_NOTIFICATION.secret, raw), 'not-a-number',
+    );
+    const res = await POST_RECEIVE(req, ctx);
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ error: 'invalid timestamp' });
+    expect(mocks.notificationAdd).not.toHaveBeenCalled();
+  });
+
+  // Порядок гейтов: подпись проверяется первой — без валидного HMAC содержимое
+  // timestamp ни на что не влияет (не oracle), наблюдается 401, не 400.
+  it('невалидная подпись + мусорный timestamp → 401 (timestamp не проверяется)', async () => {
+    mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
+    const { req, ctx } = eventReq(HOOK_NOTIFICATION.id, raw, 'deadbeef', 'garbage');
+    const res = await POST_RECEIVE(req, ctx);
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toMatchObject({ error: 'invalid signature' });
+    expect(mocks.notificationAdd).not.toHaveBeenCalled();
+  });
+
+  // Replay-сценарий: повтор байт запроса один в один (старый timestamp внутри) —
+  // каждый повтор 400 и двигает per-hook бюджет, 31-й повтор уходит в 429.
+  it('массовый повтор одной доставки (фиксированный старый ts) → 429 на 31-й', async () => {
+    mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
+    const stale = String(Date.now() - 400_000);
+    const sig = signPayload(HOOK_NOTIFICATION.secret, raw); // повторяется один в один
+    for (let i = 0; i < 30; i += 1) {
+      const { req, ctx } = eventReq(HOOK_NOTIFICATION.id, raw, sig, stale);
+      const res = await POST_RECEIVE(req, ctx);
+      expect(res.status).toBe(400);
+    }
+    expect(hookBudget(HOOK_NOTIFICATION.id).fails).toBe(30);
+    const { req, ctx } = eventReq(HOOK_NOTIFICATION.id, raw, sig, stale);
+    const res = await POST_RECEIVE(req, ctx);
+    expect(res.status).toBe(429);
+    await expect(res.json()).resolves.toMatchObject({ error: expect.stringContaining('много') });
+    expect(mocks.notificationAdd).not.toHaveBeenCalled();
   });
 });
 

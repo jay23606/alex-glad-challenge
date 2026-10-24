@@ -57,6 +57,20 @@ describe('middleware: bypass входящих webhooks (T7)', () => {
     expect(res.status).toBe(401);
   });
 
+  // #92: bypass-regex требует ровно POST — HEAD/OPTIONS на тот же путь падают в
+  // обычный auth-гейт: 401 JSON (fail-closed по методу), а не 405/пропуск.
+  it('HEAD /api/integrations/inbound/7 без сессии — 401 JSON (fail-closed по методу)', async () => {
+    const res = middleware(req('/api/integrations/inbound/7', { method: 'HEAD' }));
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toEqual({ error: 'unauthorized' });
+  });
+
+  it('OPTIONS /api/integrations/inbound/7 без сессии — 401 JSON (fail-closed по методу)', async () => {
+    const res = middleware(req('/api/integrations/inbound/7', { method: 'OPTIONS' }));
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toEqual({ error: 'unauthorized' });
+  });
+
   it('POST /api/integrations/inbound/abc и .../7/extra — 401 (regex требует ровно числовой id)', async () => {
     expect(middleware(req('/api/integrations/inbound/abc', { method: 'POST' })).status).toBe(401);
     expect(middleware(req('/api/integrations/inbound/7/extra', { method: 'POST' })).status).toBe(401);

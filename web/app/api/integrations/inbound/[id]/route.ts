@@ -4,6 +4,11 @@
 // (тот же контракт, что у исходящих webhooks); rawBody — сырые байты запроса,
 // декодирование в UTF-8 для JSON.parse — только после проверки (issue #98).
 //
+// Опциональный x-artel-timestamp (Unix ms, issue #97): нет заголовка — прежнее
+// поведение; есть — принимается только в окне ±5 мин от серверного времени,
+// иначе 400. В подпись не входит (контракт подписи заморожен, отправители не
+// ломаются) — см. docs/AUTHORIZATION.md.
+//
 // Rate-limit POST — два in-memory fixed-window, окно 5 минут у обоих (issue #103):
 // 1) per-hook: 30 неудачных попыток (401/404/400) КОНКРЕТНОГО хука → 429 + Retry-After
 //    до конца окна. Раньше счётчик был один на все хуки: 30 неудач против хука #1
@@ -120,6 +125,24 @@ function limited(budget: FailBudget, limit: number): Response | null {
   return null;
 }
 
+// Опциональная replay-защита (issue #97). Отправитель MAY передать
+// x-artel-timestamp (Unix ms): нет заголовка — поведение прежнее; есть — запрос
+// принимается только при |now − ts| ≤ окна, иначе 400. Заголовок НЕ входит в
+// подпись (контракт подписи заморожен): он отсекает наивный повтор захваченной
+// доставки — в повторе остаётся старый timestamp, а провал двигает per-hook
+// бюджет и упирается в 429. От активного подменщика заголовка (MITM) это не
+// защищает — для loopback-модели угроз достаточно, см. docs/AUTHORIZATION.md.
+const TIMESTAMP_WINDOW_MS = 300_000; // ±5 минут, симметрично в прошлое и будущее
+
+function timestampRejection(req: NextRequest): string | null {
+  const header = req.headers.get('x-artel-timestamp');
+  if (header === null) return null;
+  const ts = Number(header.trim());
+  if (!Number.isSafeInteger(ts) || ts <= 0) return 'invalid timestamp';
+  if (Math.abs(Date.now() - ts) > TIMESTAMP_WINDOW_MS) return 'stale timestamp';
+  return null;
+}
+
 // Чтение тела с капом; ok:false too-large — лимит превышен, aborted — поток
 // сорвался (обрыв клиента → 400, а не 500; это не попытка подбора подписи,
 // rate-счётчик не двигает). Сначала дешёвый precheck по заголовку
@@ -200,6 +223,15 @@ export async function POST(
   if (!hook) {
     // Неизвестный id — перебор: глобальный guard (после getHook), плюс per-hook
     // бюджет этого id — долбление одного несуществующего id отсекается до БД.
+    // Oracle 404-vs-401 (решение зафиксировано, #92; поведение не менять):
+    // неизвестный id → 404 «hook not found», известный id с неверной подписью →
+    // 401 «invalid signature». Различение сознательное — легитимный интегратор
+    // отличает опечатку в URL от ротированного секрета. Цена: существование id
+    // перебирается по статусу; утечка осознанная — существование id не секрет
+    // (id — маленькие последовательные целые, настоящая граница доступа —
+    // секрет хука), а схлопывание 404→401 устранило бы oracle, но ухудшило бы
+    // диагностику. Лимиты (глобальный guard 200/5 мин + per-hook бюджет 30/5 мин)
+    // ограничивают СКОРОСТЬ перебора, не устраняя утечку.
     const denied = limited(globalBudget, GLOBAL_FAIL_LIMIT);
     if (denied) return denied;
     registerHookFail(hookId);
@@ -209,6 +241,15 @@ export async function POST(
   if (!verifySignature(hook.secret, rawBody, signature)) {
     registerHookFail(hookId);
     return jsonError('invalid signature', 401);
+  }
+
+  // Timestamp-гейт только после успешного HMAC: без валидной подписи содержимое
+  // заголовка ни на что не влияет (не oracle). Провал — 400 и per-hook бюджет,
+  // как у прочих 400: повтор захваченной доставки ограничивается rate-limit'ом.
+  const tsReject = timestampRejection(req);
+  if (tsReject !== null) {
+    registerHookFail(hookId);
+    return jsonError(tsReject, 400);
   }
 
   // Декодирование только после успешной проверки подписи: подпись — по байтам.
