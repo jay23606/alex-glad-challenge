@@ -35,6 +35,10 @@ const HISTORY_KEY = 'antonov-history-v1';
 const HISTORY_MAX = 10;
 const MAX_AUTHOR = 120; // контракт antonovThreadSchema
 const MAX_SOURCE = 300;
+// Метаданные потока-перевода — стековая форма (label над полем): INPUT_CLASS
+// блочность/ширину не задаёт, добавляем локально (глобально менять нельзя —
+// затронет другие страницы; аналог TICKET_FIELD_CLASS в /support).
+const THREAD_META_FIELD_CLASS = `block w-full ${INPUT_CLASS}`;
 const MAX_IMAGES = 12;
 // Жёсткий кап поста Telegram — для счётчика в UI (сервер держит запас 4000).
 const TG_POST_LIMIT = 4096;
@@ -391,7 +395,7 @@ export default function AntonovPage() {
                 <input
                   id="antonov-author"
                   type="text"
-                  className={`mt-2 ${INPUT_CLASS}`}
+                  className={`mt-2 ${THREAD_META_FIELD_CLASS}`}
                   value={author}
                   maxLength={MAX_AUTHOR}
                   onChange={(e) => setAuthor(e.target.value)}
@@ -409,7 +413,7 @@ export default function AntonovPage() {
                 <input
                   id="antonov-source"
                   type="text"
-                  className={`mt-2 ${INPUT_CLASS}`}
+                  className={`mt-2 ${THREAD_META_FIELD_CLASS}`}
                   value={source}
                   maxLength={MAX_SOURCE}
                   onChange={(e) => setSource(e.target.value)}

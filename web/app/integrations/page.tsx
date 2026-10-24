@@ -8,6 +8,11 @@ import { SectionHead } from '../components/ui/SectionHead';
 import { EmptyState } from '../components/ui/EmptyState';
 import { INPUT_CLASS } from '../components/ui/Field';
 
+// Форма «Входящие webhooks» — стековый блок (space-y-2): INPUT_CLASS
+// блочность/ширину не задаёт, добавляем локально (глобально менять нельзя —
+// затронет другие страницы; аналог TICKET_FIELD_CLASS в /support).
+const INBOUND_FIELD_CLASS = `block w-full ${INPUT_CLASS}`;
+
 interface Webhook {
   id: number;
   name: string;
@@ -146,8 +151,8 @@ export default function IntegrationsPage() {
             Внешний сервис шлёт POST на URL хука с заголовком x-artel-signature (HMAC-SHA256 тела секретом);
             событие превращается в уведомление или todo.
           </p>
-          <input value={inName} onChange={(e) => setInName(e.target.value)} placeholder="Название (например, CI)" className={INPUT_CLASS} />
-          <select value={inTarget} onChange={(e) => setInTarget(e.target.value as 'notification' | 'todo')} className={INPUT_CLASS}>
+          <input value={inName} onChange={(e) => setInName(e.target.value)} placeholder="Название (например, CI)" className={INBOUND_FIELD_CLASS} />
+          <select value={inTarget} onChange={(e) => setInTarget(e.target.value as 'notification' | 'todo')} className={INBOUND_FIELD_CLASS}>
             <option value="notification">уведомление</option>
             <option value="todo">todo</option>
           </select>
