@@ -172,3 +172,45 @@ describe('middleware: config.matcher — source-паттерны матчат р
     expect(matchesMiddleware('/favicon.ico')).toBe(false);
   });
 });
+
+// --- config.matcher: prefetch-условия (missing) и runtime (#102) ---
+
+// #102: удаление missing из matcher[0] раньше проходило suite — поведение
+// middleware() от missing не зависит, его оценивает сам Next. В Next 15 условия
+// has/missing НЕ компилируются в regexp на билде: рантайм проверяет их per-request
+// (middleware-route-matcher.js → matchHas из prepare-destination.js, там
+// «!missing.some(hasMatch)» — entry пропускается, если ЛЮБОЕ missing-условие
+// совпало с хедерами запроса). Поэтому юнит-пин структуры config здесь достаточен:
+// воспроизводить оценку условий значило бы пере-имплементить матчер фреймворка.
+describe('middleware: config.matcher — prefetch-условия (missing) запинены', () => {
+  it('matcher[0] (страницы) имеет missing с обоими prefetch-хедерами', () => {
+    const entries = Array.isArray(config.matcher) ? config.matcher : [];
+    // Ровно два entry: страницы с missing + API без — индексы ниже привязаны к этому.
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toEqual({
+      source: '/((?!api|_next/static|_next/image|favicon.ico).*)',
+      // Оба условия из middleware.ts: любой prefetch-хедер пропускает страницы
+      // мимо middleware (next-router-prefetch — любое значение, purpose — ровно prefetch).
+      missing: [
+        { type: 'header', key: 'next-router-prefetch' },
+        { type: 'header', key: 'purpose', value: 'prefetch' },
+      ],
+    });
+  });
+
+  it('matcher[1] (/api/*) без missing — крафтовый prefetch-хедер не обходит auth для API', () => {
+    const entries = Array.isArray(config.matcher) ? config.matcher : [];
+    // toEqual пинит и отсутствие missing: массив условий в expected уронил бы тест.
+    expect(entries[1]).toEqual({ source: '/api/:path*' });
+  });
+
+  it('config.runtime = nodejs (node-middleware, standalone-стек на Node)', () => {
+    // MiddlewareConfigInput в типах next не декларирует runtime, но парсер его
+    // читает (get-page-static-info.js: config.runtime ?? config.config.runtime).
+    // Narrow через in: свойство может отсутствовать, если форму объявления сменят.
+    if (!('runtime' in config)) {
+      throw new Error('config.runtime отсутствует — сменилась форма объявления runtime');
+    }
+    expect(config.runtime).toBe('nodejs');
+  });
+});
