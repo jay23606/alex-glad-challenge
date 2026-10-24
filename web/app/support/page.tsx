@@ -5,7 +5,7 @@ import { useCallback, useState } from 'react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { SectionHead } from '../components/ui/SectionHead';
-import { INPUT_CLASS } from '../components/ui/Field';
+import { Field, INPUT_CLASS } from '../components/ui/Field';
 
 // Форма «Обращение»: INPUT_CLASS не задаёт блочность/ширину, добавляем локально
 // (глобально менять INPUT_CLASS нельзя — затронет другие страницы).
@@ -76,13 +76,26 @@ export default function SupportPage() {
       </Card>
 
       <Card label="Обращение">
-        <div className="space-y-2">
-          <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Тема" className={TICKET_FIELD_CLASS} />
-          <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Опишите проблему" className={`h-24 ${TICKET_FIELD_CLASS}`} />
-          <input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Контакт (email/telegram, необязательно)" className={TICKET_FIELD_CLASS} />
-          <Button variant="primary" onClick={submit}>Отправить</Button>
+        {/* <form>: Enter в полях шлёт форму; кнопка type="submit" (a11y). */}
+        <form
+          className="space-y-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submit();
+          }}
+        >
+          <Field id="support-subject" label="Тема">
+            <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Тема" className={TICKET_FIELD_CLASS} />
+          </Field>
+          <Field id="support-body" label="Описание">
+            <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Опишите проблему" className={`h-24 resize-y ${TICKET_FIELD_CLASS}`} />
+          </Field>
+          <Field id="support-contact" label="Контакт (email/telegram, необязательно)">
+            <input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Контакт (email/telegram, необязательно)" className={TICKET_FIELD_CLASS} />
+          </Field>
+          <Button variant="primary" type="submit">Отправить</Button>
           {status ? <p className="text-sm text-dim">{status}</p> : null}
-        </div>
+        </form>
       </Card>
     </div>
   );
