@@ -9,6 +9,9 @@
 // Моки повторяют реальный контракт роута /api/support/tickets (jsonOk/jsonError):
 // успех — HTTP 201 + {ok:true,id}; ошибка — HTTP 400 + {error}. page.tsx смотрит
 // только data.ok из тела, HTTP-статус не проверяет.
+// #104: статус озвучивается скринридеру — успех отправки role="status", ошибки
+// (API и валидация формы) role="alert"; in-flight guard — кнопка loading
+// (disabled + aria-busy) в полёте, повторный submit (клик/Enter) не шлёт второй POST.
 // FAQ-поиск страницы здесь не трогаем — это отдельная ветка fetch.
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -143,5 +146,50 @@ describe('SupportPage: submit формы «Обращение»', () => {
     await fillAndSubmit({ subject: 'Тема', body: 'Описание' });
 
     expect(screen.getByText('ошибка')).toBeTruthy();
+  });
+
+  it('статус озвучивается: успех — role="status", ошибки (API и валидация) — role="alert"', async () => {
+    render(<SupportPage />);
+    await fillAndSubmit({ subject: 'Тема', body: 'Описание' });
+
+    expect(screen.getByText('Обращение создано — ответим в ближайшее время.').getAttribute('role')).toBe('status');
+
+    // После успеха поля очищены — заполняем заново; API-ошибка → role="alert".
+    fetchMock.mockResolvedValue(jsonResponse(400, { error: 'База знаний недоступна' }));
+    await fillAndSubmit({ subject: 'Тема', body: 'Описание' });
+    expect(screen.getByText('База знаний недоступна').getAttribute('role')).toBe('alert');
+
+    // Ошибка API поля не очищает; пробельная тема → валидация, тоже role="alert".
+    await fillAndSubmit({ subject: '   ', body: 'Описание' });
+    expect(screen.getByText('Заполните тему и описание').getAttribute('role')).toBe('alert');
+  });
+
+  it('in-flight guard: в полёте кнопка disabled (aria-busy), повторный submit не шлёт второй fetch; после ответа кнопка снова активна', async () => {
+    // Deferred-промис: первый POST висит, пока тест сам не разрешит его.
+    let resolveFetch!: (response: Response) => void;
+    fetchMock.mockImplementation(
+      () => new Promise<Response>((resolve) => { resolveFetch = resolve; }),
+    );
+    render(<SupportPage />);
+    await fillAndSubmit({ subject: 'Тема', body: 'Описание' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const submitBtn = screen.getByRole('button', { name: 'Отправить' }) as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(true);
+    expect(submitBtn.getAttribute('aria-busy')).toBe('true');
+
+    // Повторный клик по кнопке и submit формы (Enter в поле) — оба глотаются guard'ом.
+    await act(async () => {
+      fireEvent.click(submitBtn);
+      fireEvent.submit(submitBtn.closest('form') as HTMLFormElement);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Отвечаем ошибкой API: guard обязан сброситься не только на success.
+    await act(async () => { resolveFetch(jsonResponse(400, { error: 'База знаний недоступна' })); });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(submitBtn.disabled).toBe(false);
+    expect(submitBtn.getAttribute('aria-busy')).toBeNull();
+    expect(screen.getByText('База знаний недоступна')).toBeTruthy();
   });
 });
