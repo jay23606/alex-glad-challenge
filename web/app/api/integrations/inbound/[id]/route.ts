@@ -4,10 +4,26 @@
 // (тот же контракт, что у исходящих webhooks); rawBody — сырые байты запроса,
 // декодирование в UTF-8 для JSON.parse — только после проверки (issue #98).
 //
-// Rate-limit POST: глобальный in-memory fixed-window, 30 неудачных попыток (401/404/400)
-// за 5 минут → 429 + Retry-After до конца окна. Успешная подпись (доказательство
-// владения секретом) счётчик сбрасывает. Глобальный (не per-IP) сознательно, как у
-// login: за прокси XFF подделываем; сбрасывается рестартом.
+// Rate-limit POST — два in-memory fixed-window, окно 5 минут у обоих (issue #103):
+// 1) per-hook: 30 неудачных попыток (401/404/400) КОНКРЕТНОГО хука → 429 + Retry-After
+//    до конца окна. Раньше счётчик был один на все хуки: 30 неудач против хука #1
+//    блокировали и хук #2, а сбрасывал счётчик только успех — сам заблокированный.
+//    Окно сбрасывается по времени; успех (доказательство владения секретом) сбрасывает
+//    бюджет только своего хука. Accepted risk F2: адресный lockout конкретного хука
+//    (30 мусорных подписей/5 мин → 429 до конца окна) — цена любого per-key rate-limit;
+//    митигации: мониторинг 429, ротация/DELETE хука (docs/AUTHORIZATION.md).
+// 2) глобальный abuse-guard: 200 неудач на процесс — только перебор id (невалидный
+//    или неизвестный хук): гейт применяется там, где хук не опознан (invalid-id до
+//    чтения тела, unknown hook после getHook). Известный хук глобальный кап не
+//    блокирует — иначе мусор по чужим id отзывался бы 429 на легитимные доставки.
+//    Успех глобальный счётчик НЕ сбрасывает: чередование неудача/успех не должно
+//    обнулять guard.
+// Карта per-hook бюджетов капится 1000 записями: истёкшие окна вычищаются; при полной
+// карте живых бюджетов новый id остаётся без учёта (skip tracking) — предусловие
+// практически недостижимо (~1000 живых бюджетов/окно; перебор id раньше закрывает
+// глобальный кап 200).
+// Глобальный (не per-IP) сознательно, как у login: за прокси XFF подделываем;
+// сбрасывается рестартом.
 import 'server-only';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -30,8 +46,10 @@ import { safeMessage } from '../../../../../lib/server/safe-message';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const RATE_LIMIT = 30; // неудачных попыток до блокировки
-const RATE_WINDOW_MS = 5 * 60 * 1000; // окно 5 минут
+const RATE_LIMIT = 30; // неудачных попыток одного хука до 429 (per-hook бюджет)
+const GLOBAL_FAIL_LIMIT = 200; // неудач на процесс до 429 (abuse-guard, issue #103)
+const RATE_WINDOW_MS = 5 * 60 * 1000; // окно 5 минут — общее для обоих счётчиков
+const MAX_TRACKED_HOOKS = 1000; // кап размера карты per-hook бюджетов (память)
 
 // Лимит размера тела POST до проверки подписи (issue #96). Тело нужно целиком
 // (HMAC считается по raw body), т.е. оно читается до аутентификации — без капа
@@ -40,17 +58,66 @@ const RATE_WINDOW_MS = 5 * 60 * 1000; // окно 5 минут
 // события {title, body} и отсекают всё крупное до/во время чтения.
 const MAX_BODY_BYTES = 64 * 1024;
 
-// Модульное состояние окна (globalThis — переживает HMR dev-сервера).
-const g = globalThis as unknown as { __inboundHookFails?: { fails: number; resetAt: number } };
-const state = (g.__inboundHookFails ??= { fails: 0, resetAt: 0 });
+// Модульное состояние окон (globalThis — переживает HMR dev-сервера). Роут захватывает
+// ссылки при импорте — тест мутирует содержимое через globalThis, не ссылки.
+interface FailBudget {
+  fails: number;
+  resetAt: number;
+}
+const g = globalThis as unknown as {
+  __inboundHookFails?: Map<number, FailBudget>;
+  __inboundGlobalFails?: FailBudget;
+};
+const hookBudgets: Map<number, FailBudget> = (g.__inboundHookFails ??= new Map());
+const globalBudget: FailBudget = (g.__inboundGlobalFails ??= { fails: 0, resetAt: 0 });
 
-function registerFail(): void {
-  const now = Date.now();
-  if (now >= state.resetAt) {
-    state.fails = 0;
-    state.resetAt = now + RATE_WINDOW_MS;
+// Fixed-window: истекшее окно обнуляет счётчик — через 5 минут гейт снова пускает,
+// «вечный lockout» невозможен по построению (issue #103).
+function rollWindow(budget: FailBudget, now: number): void {
+  if (now >= budget.resetAt) {
+    budget.fails = 0;
+    budget.resetAt = now + RATE_WINDOW_MS;
   }
-  state.fails += 1;
+}
+
+function registerGlobalFail(): void {
+  rollWindow(globalBudget, Date.now());
+  globalBudget.fails += 1;
+}
+
+// Карта per-hook бюджетов ограничена по размеру: при заполнении вычищаются хуки с
+// истёкшим окном. Если всё ещё тесно (все бюджеты живы) — новый id остаётся без
+// учёта: вытеснение чужого живого бюджета = бесплатный сброс блокировки легитимного
+// хука, а перебор id в это время режет глобальный guard (200/окно), памяти он не
+// угрожает. Кап — гигиена памяти, а не второй лимитер.
+function registerHookFail(hookId: number): void {
+  const now = Date.now();
+  let budget = hookBudgets.get(hookId);
+  if (!budget) {
+    if (hookBudgets.size >= MAX_TRACKED_HOOKS) {
+      for (const [key, entry] of hookBudgets) {
+        if (now >= entry.resetAt) hookBudgets.delete(key);
+      }
+      if (hookBudgets.size >= MAX_TRACKED_HOOKS) return; // skip tracking, чужие бюджеты не трогаем
+    }
+    budget = { fails: 0, resetAt: 0 };
+    hookBudgets.set(hookId, budget);
+  }
+  rollWindow(budget, now);
+  budget.fails += 1;
+}
+
+// 429 + Retry-After до конца окна; сам 429-путь счётчики не двигает.
+function limited(budget: FailBudget, limit: number): Response | null {
+  const now = Date.now();
+  if (budget.fails >= limit && now < budget.resetAt) {
+    const retryAfterSec = Math.max(1, Math.ceil((budget.resetAt - now) / 1000));
+    return NextResponse.json(
+      { error: 'Слишком много неудачных попыток. Подождите до конца 5-минутного окна.' },
+      { status: 429, headers: { 'Cache-Control': 'no-store', 'Retry-After': String(retryAfterSec) } },
+    );
+  }
+  return null;
 }
 
 // Чтение тела с капом; ok:false too-large — лимит превышен, aborted — поток
@@ -101,20 +168,22 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  if (state.fails >= RATE_LIMIT && Date.now() < state.resetAt) {
-    const retryAfterSec = Math.max(1, Math.ceil((state.resetAt - Date.now()) / 1000));
-    return NextResponse.json(
-      { error: 'Слишком много неудачных попыток. Подождите до конца 5-минутного окна.' },
-      { status: 429, headers: { 'Cache-Control': 'no-store', 'Retry-After': String(retryAfterSec) } },
-    );
-  }
-
+  // Гейты вперёд, порядок limit → id → sizeGate → hook → HMAC сохранён. Глобальный
+  // abuse-guard — только перебор id (невалидный/неизвестный хук); доставки известного
+  // хука он не трогает: иначе 200 мусорных запросов по чужим id отзывались бы 429 на
+  // легитимные подписанные события (issue #103, Val103CR).
   const { id } = await params;
   const hookId = Number(id);
   if (!Number.isInteger(hookId) || hookId <= 0) {
-    registerFail();
+    // Невалидный id — чистый перебор: глобальный guard до чтения тела.
+    const denied = limited(globalBudget, GLOBAL_FAIL_LIMIT);
+    if (denied) return denied;
+    registerGlobalFail();
     return jsonError('invalid id', 400);
   }
+  const budget = hookBudgets.get(hookId);
+  const hookDenied = budget ? limited(budget, RATE_LIMIT) : null;
+  if (hookDenied) return hookDenied;
 
   // Сырое тело до JSON.parse — подпись считается по его байтам. Читается с
   // капом: oversized → 413 до/во время чтения, до проверки подписи (issue #96);
@@ -129,11 +198,16 @@ export async function POST(
 
   const hook = await withDb(() => getInboundHookDb().get(hookId));
   if (!hook) {
-    registerFail();
+    // Неизвестный id — перебор: глобальный guard (после getHook), плюс per-hook
+    // бюджет этого id — долбление одного несуществующего id отсекается до БД.
+    const denied = limited(globalBudget, GLOBAL_FAIL_LIMIT);
+    if (denied) return denied;
+    registerHookFail(hookId);
+    registerGlobalFail();
     return jsonError('hook not found', 404);
   }
   if (!verifySignature(hook.secret, rawBody, signature)) {
-    registerFail();
+    registerHookFail(hookId);
     return jsonError('invalid signature', 401);
   }
 
@@ -143,12 +217,12 @@ export async function POST(
   try {
     json = JSON.parse(bodyText) as unknown;
   } catch {
-    registerFail();
+    registerHookFail(hookId);
     return jsonError('body must be valid JSON', 400);
   }
   const parsed = inboundEventSchema.safeParse(json);
   if (!parsed.success) {
-    registerFail();
+    registerHookFail(hookId);
     return jsonError(parsed.error.issues[0]?.message ?? 'invalid request', 400);
   }
 
@@ -159,12 +233,13 @@ export async function POST(
         todos: getTodoDb(),
       }),
     );
-    // Успех: валидная подпись доказывает владение секретом → сброс окна (как у login).
-    state.fails = 0;
-    state.resetAt = 0;
+    // Успех: валидная подпись доказывает владение секретом → сброс бюджета своего
+    // хука (как у login). Глобальный guard успехом не сбрасывается: чередование
+    // неудача/успех не должно обнулять его.
+    hookBudgets.delete(hookId);
     return jsonOk({ id: recordId });
   } catch (e) {
-    registerFail();
+    registerHookFail(hookId);
     return jsonError(safeMessage(e instanceof Error ? e.message : 'handle failed'), 400);
   }
 }

@@ -1,7 +1,7 @@
 // Unit: Route Handlers /api/integrations/inbound — управление входящими хуками
 // (GET/POST, session-auth) и приём событий POST /api/integrations/inbound/[id]
-// (публичный: HMAC-подпись вместо сессии, rate-limit неудач 30/5 мин — issue #62)
-// + DELETE [id].
+// (публичный: HMAC-подпись вместо сессии; rate-limit — 30 неудач/хук/5 мин
+// + глобальный abuse-guard 200/5 мин, issue #103) + DELETE [id].
 // db (getInboundHookDb/getNotificationDb/getTodoDb/withDb) мокается по образцу
 // rag-notes-route.spec.ts; chokepoint мокается с реальными pure-частями core
 // (handleInboundEvent/verifySignature/NotificationService — без сети и файлов).
@@ -81,19 +81,39 @@ beforeEach(() => {
   mocks.deleteHook.mockReset();
   mocks.notificationAdd.mockReset().mockReturnValue(42);
   mocks.todoAdd.mockReset().mockReturnValue(7);
-  Object.assign(failState(), { fails: 0, resetAt: 0 });
+  hookBudgets().clear();
+  Object.assign(globalBudget(), { fails: 0, resetAt: 0 });
 });
 
 function cookieValue(): string {
   return `admin_session=${createSessionValue()}`;
 }
 
-// Состояние rate-limit роута [id] (globalThis). Мутируем существующий объект —
-// роут захватывает ссылку на него при импорте, переприсваивать нельзя.
-function failState(): { fails: number; resetAt: number } {
-  const g = globalThis as unknown as { __inboundHookFails?: { fails: number; resetAt: number } };
-  if (!g.__inboundHookFails) g.__inboundHookFails = { fails: 0, resetAt: 0 };
+// Состояние rate-limit роута [id] (globalThis): карта per-hook бюджетов + глобальный
+// abuse-guard. Роут захватывает ссылки на Map/объект при импорте — переприсваивать
+// нельзя, мутируем содержимое.
+interface FailBudget {
+  fails: number;
+  resetAt: number;
+}
+function hookBudgets(): Map<number, FailBudget> {
+  const g = globalThis as unknown as { __inboundHookFails?: Map<number, FailBudget> };
+  if (!g.__inboundHookFails) g.__inboundHookFails = new Map();
   return g.__inboundHookFails;
+}
+function hookBudget(hookId: number): FailBudget {
+  const budgets = hookBudgets();
+  let budget = budgets.get(hookId);
+  if (!budget) {
+    budget = { fails: 0, resetAt: 0 };
+    budgets.set(hookId, budget);
+  }
+  return budget;
+}
+function globalBudget(): FailBudget {
+  const g = globalThis as unknown as { __inboundGlobalFails?: FailBudget };
+  if (!g.__inboundGlobalFails) g.__inboundGlobalFails = { fails: 0, resetAt: 0 };
+  return g.__inboundGlobalFails;
 }
 
 function eventReq(
@@ -271,7 +291,7 @@ describe('POST [id]: подпись по сырым байтам и обрыв �
     await expect(res.json()).resolves.toMatchObject({ error: 'request aborted' });
     expect(mocks.getHook).not.toHaveBeenCalled();
     expect(mocks.notificationAdd).not.toHaveBeenCalled();
-    expect(failState().fails).toBe(0);
+    expect(hookBudget(HOOK_NOTIFICATION.id).fails).toBe(0);
   });
 });
 
@@ -291,7 +311,7 @@ describe('POST [id]: лимит размера тела — 413 до HMAC (issue
     expect(mocks.getHook).not.toHaveBeenCalled(); // отказ до обращения к БД
     expect(mocks.notificationAdd).not.toHaveBeenCalled();
     expect(mocks.todoAdd).not.toHaveBeenCalled();
-    expect(failState().fails).toBe(0); // 413 — не перебор подписи, счётчик неудач не растёт
+    expect(hookBudget(HOOK_NOTIFICATION.id).fails).toBe(0); // 413 — не перебор подписи, счётчик неудач не растёт
   });
 
   it('oversized без Content-Length (стрим) → чтение обрывается капом → 413, событие не создаётся', async () => {
@@ -305,7 +325,7 @@ describe('POST [id]: лимит размера тела — 413 до HMAC (issue
     await expect(res.json()).resolves.toMatchObject({ error: expect.stringContaining('large') });
     expect(mocks.notificationAdd).not.toHaveBeenCalled();
     expect(mocks.todoAdd).not.toHaveBeenCalled();
-    expect(failState().fails).toBe(0);
+    expect(hookBudget(HOOK_NOTIFICATION.id).fails).toBe(0);
   });
 
   it('тело ровно 64 KiB проходит гейт → 401 по подписи (а не 413)', async () => {
@@ -314,7 +334,7 @@ describe('POST [id]: лимит размера тела — 413 до HMAC (issue
     const { req, ctx } = eventReq(HOOK_NOTIFICATION.id, raw, 'deadbeef');
     const res = await POST_RECEIVE(req, ctx);
     expect(res.status).toBe(401); // гейт пропустил, отвергла подпись
-    expect(failState().fails).toBe(1);
+    expect(hookBudget(HOOK_NOTIFICATION.id).fails).toBe(1);
   });
 
   it('multi-chunk oversized: чанки по 40 KiB (каждый ≤ MAX) → 413, cancel доходит до продюсера', async () => {
@@ -330,7 +350,7 @@ describe('POST [id]: лимит размера тела — 413 до HMAC (issue
     expect(pulls()).toBeLessThan(4); // вытянуто ≤ 2-3 чанков: стрим не вычитан до конца
     expect(mocks.notificationAdd).not.toHaveBeenCalled();
     expect(mocks.todoAdd).not.toHaveBeenCalled();
-    expect(failState().fails).toBe(0);
+    expect(hookBudget(HOOK_NOTIFICATION.id).fails).toBe(0);
   });
 
   // Аудит #98 (HIGH): переполнение мелкими чанками — 100×700 B ≈ 70 KiB > капа.
@@ -361,7 +381,7 @@ describe('POST [id]: лимит размера тела — 413 до HMAC (issue
     expect(cancelled).toBe(true); // cancel при переполнении: кап не уводит в 400
     expect(pulls).toBeLessThan(100); // кап сработал до исчерпания продюсера (~94 чанка)
     expect(mocks.getHook).not.toHaveBeenCalled();
-    expect(failState().fails).toBe(0);
+    expect(hookBudget(HOOK_NOTIFICATION.id).fails).toBe(0);
   });
 
   it('Content-Length ровно MAX проходит precheck → 401 по подписи (а не 413)', async () => {
@@ -370,7 +390,7 @@ describe('POST [id]: лимит размера тела — 413 до HMAC (issue
     req.headers.set('content-length', String(64 * 1024)); // == MAX: граница precheck не отклоняет
     const res = await POST_RECEIVE(req, ctx);
     expect(res.status).toBe(401); // при мутации «>=» precheck дал бы 413
-    expect(failState().fails).toBe(1);
+    expect(hookBudget(HOOK_NOTIFICATION.id).fails).toBe(1);
   });
 });
 
@@ -465,7 +485,7 @@ describe('DELETE /api/integrations/inbound/[id]', () => {
   });
 });
 
-describe('rate-limit POST /api/integrations/inbound/[id] (30 неудач/5 мин, globalThis)', () => {
+describe('rate-limit POST /api/integrations/inbound/[id] (30 неудач/хук/5 мин + глобальный кап 200)', () => {
   it('30 неудачных подписей → 401, 31-я → 429 + Retry-After; 429 не инкрементит', async () => {
     mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
     for (let i = 0; i < 30; i++) {
@@ -473,7 +493,7 @@ describe('rate-limit POST /api/integrations/inbound/[id] (30 неудач/5 ми
       const res = await POST_RECEIVE(req, ctx);
       expect(res.status).toBe(401);
     }
-    expect(failState().fails).toBe(30);
+    expect(hookBudget(HOOK_NOTIFICATION.id).fails).toBe(30);
 
     const { req, ctx } = eventReq(HOOK_NOTIFICATION.id, JSON.stringify({ title: 'x' }), 'deadbeef');
     const res = await POST_RECEIVE(req, ctx);
@@ -483,8 +503,62 @@ describe('rate-limit POST /api/integrations/inbound/[id] (30 неудач/5 ми
     expect(retryAfter).not.toBeNull();
     expect(Number(retryAfter)).toBeGreaterThan(0);
     expect(Number(retryAfter)).toBeLessThanOrEqual(300); // окно 5 минут
-    expect(failState().fails).toBe(30); // 429 сам счётчик не двигает
+    expect(hookBudget(HOOK_NOTIFICATION.id).fails).toBe(30); // 429 сам счётчик не двигает
     expect(mocks.notificationAdd).not.toHaveBeenCalled();
+  });
+
+  // issue #103: бюджеты изолированы по хукам — блокировка #5 не задевает #6.
+  it('30 неудач хука #5 → 429 для #5, но хук #6 отвечает 401 (не 429)', async () => {
+    mocks.getHook.mockImplementation((id: number) =>
+      id === HOOK_NOTIFICATION.id ? HOOK_NOTIFICATION : id === HOOK_TODO.id ? HOOK_TODO : null,
+    );
+    for (let i = 0; i < 30; i++) {
+      const { req, ctx } = eventReq(HOOK_NOTIFICATION.id, JSON.stringify({ title: 'x' }), 'deadbeef');
+      expect((await POST_RECEIVE(req, ctx)).status).toBe(401);
+    }
+    const blocked = eventReq(HOOK_NOTIFICATION.id, JSON.stringify({ title: 'x' }), 'deadbeef');
+    expect((await POST_RECEIVE(blocked.req, blocked.ctx)).status).toBe(429);
+
+    // Бюджет #6 пуст → подпись отвергается обычным 401 (глобальный guard далеко от капа).
+    const other = eventReq(HOOK_TODO.id, JSON.stringify({ title: 'x' }), 'deadbeef');
+    expect((await POST_RECEIVE(other.req, other.ctx)).status).toBe(401);
+    expect(hookBudget(HOOK_TODO.id).fails).toBe(1);
+    expect(hookBudget(HOOK_NOTIFICATION.id).fails).toBe(30); // 429 по #5 не списал бюджет #6
+
+    // Легитимная доставка в #6 проходит, пока #5 в 429: бюджеты и гейты независимы.
+    const delivered = signedReq(HOOK_TODO, { title: 'ок при чужом 429', body: 'ок' });
+    expect((await POST_RECEIVE(delivered.req, delivered.ctx)).status).toBe(200);
+    expect(mocks.todoAdd).toHaveBeenCalled();
+  });
+
+  // issue #103 / Val103CR: глобальный abuse-guard — кап 200 на процесс, скоуп —
+  // только перебор id (невалидный/неизвестный хук); известный хук он не блокирует.
+  it('глобальный кап: 200 невалидных id → перебор 429, но доставка в хук #6 → 200', async () => {
+    // 200 переборных неудач по невалидным id (400): per-hook бюджеты не создаются.
+    mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
+    for (let i = 0; i < 200; i++) {
+      const { req, ctx } = eventReq(0, '{}', 'deadbeef');
+      expect((await POST_RECEIVE(req, ctx)).status).toBe(400);
+    }
+    expect(globalBudget().fails).toBe(200);
+    expect(hookBudget(HOOK_NOTIFICATION.id).fails).toBe(0); // невалидный id — не к хуку
+
+    // Перебор заблокирован: невалидный id и неизвестный хук → 429 + Retry-After.
+    mocks.getHook.mockReturnValue(null);
+    const invalid = eventReq(0, '{}', 'deadbeef');
+    expect((await POST_RECEIVE(invalid.req, invalid.ctx)).status).toBe(429);
+    const unknown = eventReq(9999, '{}', 'deadbeef');
+    const blockedUnknown = await POST_RECEIVE(unknown.req, unknown.ctx);
+    expect(blockedUnknown.status).toBe(429);
+    expect(blockedUnknown.headers.get('retry-after')).not.toBeNull();
+    expect(globalBudget().fails).toBe(200); // 429-путь сам счётчик не двигает
+
+    // Главное: кап НЕ блокирует легитимную доставку в известный хук → 200 + событие.
+    mocks.getHook.mockReturnValue(HOOK_TODO);
+    const ok = signedReq(HOOK_TODO, { title: 'мимо капа', body: 'ок' });
+    const res = await POST_RECEIVE(ok.req, ok.ctx);
+    expect(res.status).toBe(200);
+    expect(mocks.todoAdd).toHaveBeenCalled(); // событие создано
   });
 
   it('после истечения окна (мок Date.now) счётчик сбрасывается → снова 401, не 429', async () => {
@@ -496,36 +570,66 @@ describe('rate-limit POST /api/integrations/inbound/[id] (30 неудач/5 ми
         const { req, ctx } = eventReq(HOOK_NOTIFICATION.id, JSON.stringify({ title: 'x' }), 'deadbeef');
         await POST_RECEIVE(req, ctx);
       }
-      // +5 минут и секунда: окно истекло → fuse отпускает, новая неудача открывает новое окно.
+      expect(hookBudget(HOOK_NOTIFICATION.id).fails).toBe(30);
+      expect(hookBudget(HOOK_NOTIFICATION.id).resetAt).toBe(now + 5 * 60 * 1000);
+      const locked = eventReq(HOOK_NOTIFICATION.id, JSON.stringify({ title: 'x' }), 'deadbeef');
+      expect((await POST_RECEIVE(locked.req, locked.ctx)).status).toBe(429);
+
+      // +5 минут и секунда: окно истекло → fuse отпускает, неудача открывает новое окно.
       spy.mockReturnValue(now + 5 * 60 * 1000 + 1000);
       const { req, ctx } = eventReq(HOOK_NOTIFICATION.id, JSON.stringify({ title: 'x' }), 'deadbeef');
       const res = await POST_RECEIVE(req, ctx);
       expect(res.status).toBe(401);
-      expect(failState().fails).toBe(1);
-      expect(failState().resetAt).toBeGreaterThan(now + 5 * 60 * 1000);
+      expect(hookBudget(HOOK_NOTIFICATION.id).fails).toBe(1);
+      expect(hookBudget(HOOK_NOTIFICATION.id).resetAt).toBe(now + 10 * 60 * 1000 + 1000);
     } finally {
       spy.mockRestore();
     }
   });
 
-  it('успешная подпись не инкрементит счётчик и сбрасывает окно (паттерн login)', async () => {
+  // issue #103: успех — доказательство владения секретом — сбрасывает бюджет только
+  // своего хука; глобальный guard обнулить чередованием неудача/успех нельзя.
+  it('успешная подпись сбрасывает бюджет своего хука, глобальный guard — нет', async () => {
     mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
     // 29 неудач — на грани лимита.
     for (let i = 0; i < 29; i++) {
       const { req, ctx } = eventReq(HOOK_NOTIFICATION.id, JSON.stringify({ title: 'x' }), 'deadbeef');
       await POST_RECEIVE(req, ctx);
     }
-    expect(failState().fails).toBe(29);
+    expect(hookBudget(HOOK_NOTIFICATION.id).fails).toBe(29);
 
     const { req, ctx } = signedReq(HOOK_NOTIFICATION, { title: 'ок', body: 'ок' });
     const res = await POST_RECEIVE(req, ctx);
     expect(res.status).toBe(200);
-    expect(failState().fails).toBe(0); // успех обнулил окно
+    expect(hookBudget(HOOK_NOTIFICATION.id).fails).toBe(0); // успех обнулил бюджет хука
+    expect(globalBudget().fails).toBe(0); // неудачи известного хука глобальный guard не двигают
 
-    // Следующая неудача — снова 401, а не 429: счётчик начинался с нуля.
+    // Следующая неудача — снова 401, а не 429: бюджет начинался с нуля.
     const retry = eventReq(HOOK_NOTIFICATION.id, JSON.stringify({ title: 'x' }), 'deadbeef');
     const res2 = await POST_RECEIVE(retry.req, retry.ctx);
     expect(res2.status).toBe(401);
-    expect(failState().fails).toBe(1);
+    expect(hookBudget(HOOK_NOTIFICATION.id).fails).toBe(1);
+  });
+
+  it('карта бюджетов ограничена (1000): истёкшие вычищаются, живые не вытесняются (skip tracking)', async () => {
+    mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);
+    const budgets = hookBudgets();
+    // 1) Все слоты с истёкшими окнами → одна неудача вычищает их, остаётся новый бюджет.
+    for (let i = 1001; i <= 2000; i++) budgets.set(i, { fails: 5, resetAt: 1 });
+    const first = eventReq(HOOK_NOTIFICATION.id, JSON.stringify({ title: 'x' }), 'deadbeef');
+    expect((await POST_RECEIVE(first.req, first.ctx)).status).toBe(401);
+    expect(budgets.size).toBe(1);
+    expect(budgets.get(HOOK_NOTIFICATION.id)?.fails).toBe(1);
+
+    // 2) Все слоты живы → новый id остаётся без учёта (skip tracking), чужие бюджеты
+    // целы: вытеснение живого бюджета = бесплатный сброс блокировки легитимного хука.
+    budgets.clear();
+    const future = Date.now() + 10 * 60 * 1000;
+    for (let i = 1001; i <= 2000; i++) budgets.set(i, { fails: 5, resetAt: future });
+    const second = eventReq(HOOK_NOTIFICATION.id, JSON.stringify({ title: 'x' }), 'deadbeef');
+    expect((await POST_RECEIVE(second.req, second.ctx)).status).toBe(401);
+    expect(budgets.size).toBe(1000);
+    expect(budgets.has(1001)).toBe(true); // ничего не вытеснено
+    expect(budgets.has(HOOK_NOTIFICATION.id)).toBe(false); // новый id — без учёта
   });
 });
