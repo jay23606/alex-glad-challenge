@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
@@ -70,6 +71,7 @@ import ru.memo7.artel.ui.components.RingCaption
 import ru.memo7.artel.ui.components.PillBadge
 import ru.memo7.artel.ui.components.ScreenTitle
 import ru.memo7.artel.ui.components.StateContainer
+import ru.memo7.artel.ui.components.isCompactLayout
 import ru.memo7.artel.ui.components.rememberPressScale
 import ru.memo7.artel.ui.theme.ArtelShapes
 import ru.memo7.artel.ui.theme.Cheese
@@ -269,7 +271,7 @@ private fun DashboardContent(
                 modifier = Modifier.weight(1f),
                 icon = Icons.Rounded.Folder,
                 value = data.counts.projects,
-                label = "проекты",
+                label = pluralRu(data.counts.projects, "проект", "проекта", "проектов"),
                 tint = MaterialTheme.colorScheme.primary,
                 onClick = onOpenProjects,
             )
@@ -277,7 +279,7 @@ private fun DashboardContent(
                 modifier = Modifier.weight(1f),
                 icon = Icons.Rounded.TaskAlt,
                 value = data.counts.openTasks,
-                label = "открытые задачи",
+                label = pluralRu(data.counts.openTasks, "задача", "задачи", "задач"),
                 tint = MaterialTheme.colorScheme.secondary,
                 onClick = onOpenProjects,
             )
@@ -285,7 +287,7 @@ private fun DashboardContent(
                 modifier = Modifier.weight(1f),
                 icon = Icons.Rounded.Notifications,
                 value = data.notifications.unread,
-                label = "новые",
+                label = pluralRu(data.notifications.unread, "новое", "новых", "новых"),
                 tint = MaterialTheme.colorScheme.tertiary,
                 onClick = onOpenNotifications,
             )
@@ -315,7 +317,7 @@ private fun DashboardContent(
                         val onTint = if (achievement.unlocked) {
                             MaterialTheme.colorScheme.onSecondary
                         } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
+                            MaterialTheme.colorScheme.onBackground
                         }
                         val interactionSource = remember { MutableInteractionSource() }
                         val scale = rememberPressScale(interactionSource, pressedScale = 0.92f)
@@ -336,17 +338,19 @@ private fun DashboardContent(
                                 (if (achievement.unlocked) "🏆 " else "🔒 ") + achievement.title,
                                 style = MaterialTheme.typography.titleMedium,
                                 color = onTint,
-                                maxLines = 1,
+                                maxLines = if (isCompactLayout()) 3 else 2,
+                                overflow = TextOverflow.Ellipsis,
                             )
                             Text(
                                 achievement.description,
                                 style = MaterialTheme.typography.labelMedium,
-                                color = onTint.copy(alpha = 0.75f),
+                                color = onTint,
                                 maxLines = 2,
                             )
                             PillBadge(
                                 text = if (achievement.unlocked) "получено" else "в процессе",
-                                tint = onTint,
+                                tint = if (achievement.unlocked) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.background,
+                                containerColor = if (achievement.unlocked) MaterialTheme.colorScheme.onSecondary else MaterialTheme.colorScheme.onBackground,
                                 modifier = Modifier.padding(top = 6.dp),
                             )
                         }
@@ -424,6 +428,17 @@ private fun DashboardContent(
     }
 }
 
+/** Русское множественное число: 1 проект / 2 проекта / 5 проектов; 11–14 → many. */
+internal fun pluralRu(n: Int, one: String, few: String, many: String): String {
+    val mod100 = n % 100
+    return when {
+        mod100 in 11..14 -> many
+        mod100 % 10 == 1 -> one
+        mod100 % 10 in 2..4 -> few
+        else -> many
+    }
+}
+
 @Composable
 private fun CountTile(
     modifier: Modifier,
@@ -433,7 +448,10 @@ private fun CountTile(
     tint: Color,
     onClick: () -> Unit,
 ) {
-    BentoCard(modifier = modifier.height(120.dp), onClick = onClick) {
+    // Компактный экран/крупный шрифт: выше и две строки подписи, чтобы «2 проекта» влезало целиком (#128).
+    // 142dp = 28 padding + 34 иконка + 39 значение + 39 две строки (все lineHeight ×1.3) + 2dp запас.
+    val compact = isCompactLayout()
+    BentoCard(modifier = modifier.height(if (compact) 142.dp else 120.dp), onClick = onClick) {
         Column(Modifier.padding(14.dp)) {
             Box(
                 modifier = Modifier
@@ -454,7 +472,8 @@ private fun CountTile(
                 label,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
+                maxLines = if (compact) 2 else 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }

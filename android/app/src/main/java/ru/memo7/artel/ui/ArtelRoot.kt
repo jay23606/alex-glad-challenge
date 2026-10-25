@@ -28,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
@@ -38,6 +39,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import ru.memo7.artel.di.AppContainer
+import ru.memo7.artel.ui.components.isCompactLayout
 import ru.memo7.artel.ui.screens.assistant.AssistantScreen
 import ru.memo7.artel.ui.screens.automation.AutomationScreen
 import ru.memo7.artel.ui.screens.calendar.CalendarScreen
@@ -65,12 +67,18 @@ object Routes {
     fun projectDetail(id: Long) = "project/$id"
 }
 
-private data class BottomItem(val route: String, val label: String, val icon: ImageVector)
+/** Полное [label] доступен TalkBack через contentDescription иконки; [shortLabel] рисуется. */
+private data class BottomItem(
+    val route: String,
+    val label: String,
+    val icon: ImageVector,
+    val shortLabel: String = label,
+)
 
 private val bottomItems = listOf(
     BottomItem(Routes.DASHBOARD, "Главная", Icons.Rounded.Home),
     BottomItem(Routes.PROJECTS, "Проекты", Icons.Rounded.Folder),
-    BottomItem(Routes.AUTOMATION, "Автоматизация", Icons.Rounded.Bolt),
+    BottomItem(Routes.AUTOMATION, "Автоматизация", Icons.Rounded.Bolt, shortLabel = "Авто"),
     BottomItem(Routes.CALENDAR, "Календарь", Icons.Rounded.CalendarMonth),
     BottomItem(Routes.ASSISTANT, "Ассистент", Icons.AutoMirrored.Rounded.Chat),
 )
@@ -99,6 +107,8 @@ fun ArtelRoot(container: AppContainer) {
                 ) {
                     bottomItems.forEach { item ->
                         val selected = currentRoute == item.route
+                        // Компактный экран/крупный шрифт: только иконка, полное имя в contentDescription (#121).
+                        val compact = isCompactLayout()
                         NavigationBarItem(
                             selected = selected,
                             onClick = {
@@ -108,8 +118,24 @@ fun ArtelRoot(container: AppContainer) {
                                     restoreState = true
                                 }
                             },
-                            icon = { Icon(item.icon, contentDescription = item.label) },
-                            label = { Text(item.label, style = MaterialTheme.typography.labelMedium) },
+                            icon = {
+                                Icon(
+                                    item.icon,
+                                    contentDescription = if (compact) item.label else null,
+                                )
+                            },
+                            label = if (compact) {
+                                null
+                            } else {
+                                {
+                                    Text(
+                                        item.shortLabel,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            },
                             alwaysShowLabel = true,
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = MaterialTheme.colorScheme.primary,

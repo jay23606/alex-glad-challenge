@@ -247,7 +247,7 @@ private fun AchievementRow(achievement: AchievementDto, modifier: Modifier = Mod
     val onTint = if (achievement.unlocked) {
         MaterialTheme.colorScheme.onSecondary
     } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
+        MaterialTheme.colorScheme.onBackground
     }
     Row(
         modifier = modifier
@@ -261,17 +261,18 @@ private fun AchievementRow(achievement: AchievementDto, modifier: Modifier = Mod
             Text(
                 (if (achievement.unlocked) "🏆 " else "🔒 ") + achievement.title,
                 style = MaterialTheme.typography.titleMedium,
-                color = if (achievement.unlocked) MaterialTheme.colorScheme.onBackground else onTint,
+                color = onTint,
             )
             Text(
                 achievement.description,
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = onTint,
             )
         }
         PillBadge(
             text = if (achievement.unlocked) "получено" else "в процессе",
-            tint = if (achievement.unlocked) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outline,
+            tint = if (achievement.unlocked) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.background,
+            containerColor = if (achievement.unlocked) MaterialTheme.colorScheme.onSecondary else MaterialTheme.colorScheme.onBackground,
         )
     }
 }

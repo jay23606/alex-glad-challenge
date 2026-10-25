@@ -1,5 +1,7 @@
 package ru.memo7.artel.ui.theme
 
+import android.app.Activity
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -7,11 +9,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
 import ru.memo7.artel.data.ThemeMode
 
-private val DarkColors = darkColorScheme(
+internal val DarkColors = darkColorScheme(
     primary = Tomato,
     onPrimary = Color(0xFF2A0E05),
     primaryContainer = TomatoContainer,
@@ -39,7 +45,7 @@ private val DarkColors = darkColorScheme(
     outlineVariant = OvenOutline,
 )
 
-private val LightColors = lightColorScheme(
+internal val LightColors = lightColorScheme(
     primary = TomatoDeep,
     onPrimary = Color(0xFFFFFFFF),
     primaryContainer = TomatoContainerLight,
@@ -86,6 +92,23 @@ fun ArtelTheme(themeMode: ThemeMode, content: @Composable () -> Unit) {
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
         ThemeMode.DARK -> true
         ThemeMode.LIGHT -> false
+    }
+    // Иконки статус-бара и навбара следуют теме приложения, а не системы (#122).
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            (view.context as? Activity)?.window?.let { window ->
+                WindowCompat.getInsetsController(window, view).apply {
+                    isAppearanceLightStatusBars = !dark
+                    isAppearanceLightNavigationBars = !dark
+                }
+                // API 26–28: enableEdgeToEdge красит навбар системным скримом —
+                // выравниваем фон по теме приложения (API 29+ не трогаем).
+                if (Build.VERSION.SDK_INT < 29) {
+                    window.navigationBarColor = (if (dark) OvenBg else PaperBg).toArgb()
+                }
+            }
+        }
     }
     MaterialTheme(
         colorScheme = if (dark) DarkColors else LightColors,

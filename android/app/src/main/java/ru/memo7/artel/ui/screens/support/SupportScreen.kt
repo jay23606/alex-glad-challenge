@@ -23,6 +23,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -230,6 +231,15 @@ private fun TicketSection(vm: SupportViewModel, state: SupportUiState) {
     var body by remember { mutableStateOf("") }
     var contact by remember { mutableStateOf("") }
     var formVisible by remember { mutableStateOf(false) }
+
+    // После успешного создания поля очищаются, success-сообщение остаётся (#125).
+    LaunchedEffect(state.ticketDone) {
+        if (state.ticketDone != null) {
+            subject = ""
+            body = ""
+            contact = ""
+        }
+    }
 
     Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
         Text("Не нашли ответ?", style = MaterialTheme.typography.titleLarge)

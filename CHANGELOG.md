@@ -1528,3 +1528,53 @@ closed 0, asked-user 1, метрика неполная до commit.
 `web/lib/server/style-prompt.ts`, `web/app/dashboard/page.tsx`,
 `web/test/unit/*`, `web/e2e/antonov.spec.ts`,
 `docs/auantonov-rewrite-prompt.md`.
+
+## Execution loop: Android ↔ web parity + UX-фиксы (2026-10-25)
+**Дата:** 2026-10-25. Профиль «Бизнес-фича» + bugfix (AGENTS §13.3–§13.4).
+**Milestone:** `run-2026-10-25-android`; epic #111.
+**Issues:** #105–#109, #112–#117, #120–#122, #124–#128.
+
+**Что сделано:**
+- Android core flow: `PATCH /api/workspace/items/{id}` вместо коллекции (был 405),
+  refresh списка после toggle, per-item in-flight guard, ошибки — в snackbar;
+  cancellation больше не маскируется под сетевую ошибку в `ArtelRepository`.
+- Automation: nullable `blogSlug`, `stylePreset` (`default|antonov`) через
+  `PATCH /api/blogs/{slug}` с mobile Bearer, пресеты интервала до 1440 мин,
+  сохранение исходного значения, `SnackbarHost`/`Channel`.
+- Новые экраны: «Геймификация» (XP-журнал + достижения, вход с дашборда) и
+  «Задачи» (список, повтор, complete/dismiss/delete).
+- Календарь: локальный refresh отделён от Google sync, sync заблокирован без
+  Google, `.ics`-экспорт через FileProvider/share sheet, русские подписи
+  источников, prune старых файлов, ошибки share.
+- Уведомления: SQLite-даты как UTC → локальное время, корректные типы,
+  `markRead(id)` и безопасный http(s)-`href`.
+- Android UX: 401 на Connect, отдельная ошибка FAQ, лимит 2000 у ассистента;
+  полная маска токена с авто-скрытием через 20 с; сброс формы поддержки.
+- Дизайн: AA-контраст achievement-карточек (inverted pills, полная
+  непрозрачность), icon-only bottom nav на 320dp/fs1.3, полный accent-заголовок,
+  русская плюрализация счётчиков, системные бары по теме приложения (включая
+  API 26–28).
+- Web: `tgVisibleText` для уведомления/превью/истории (литеральные `< >` и
+  `parseMode:none`), Field-label на `/integrations`, header без overflow
+  640–1024px, тесты DELETE-границ и дефолтного publish-пути.
+
+**Проверки:** `pnpm --filter challenge typecheck` + 239 tests; `pnpm --filter
+web typecheck` + 482 tests; `pnpm --filter web build` — 48 страниц; Android
+`:app:assembleDebug :app:testDebugUnitTest` — 40 tests / 12 классов;
+Playwright `header.spec.ts` 9/9, `composer.spec.ts` — 14 passed/1 pre-existing
+skip; E2E в эмуляторе Android: connect, dashboard, gamification, todos,
+projects + toggle, automation style/1440, calendar refresh/.ics, notifications,
+support, settings, dark/light и 320dp/fs1.3. Скриншоты — `.shots/android/`.
+
+**Риски/ограничения:** web-only admin/dev-поверхности (RAG, blog, TG, MCP,
+integrations, server settings) намеренно не переносились на Android; E2E шёл
+против локального dev-сервера и локальной SQLite, production-сборка web
+проверена build'ом, production Android-подпись/Play Store не затрагивались;
+локальные E2E-данные (проект «Android E2E», задачи, выключенное правило
+автоматизации) остаются в `challenge/.data`.
+
+**Код:** `android/**`, `web/lib/shared/tg-html.ts`,
+`web/app/api/telegram/publish/route.ts`, `web/app/telegram/publish/TgComposer.tsx`,
+`web/app/blog/posts/[id]/page.tsx`, `web/app/integrations/page.tsx`,
+`web/app/components/Nav.tsx`, `web/app/api/blogs/[slug]/route.ts`,
+`web/test/**`, `challenge/src/core/agents/automationRun.test.ts`.

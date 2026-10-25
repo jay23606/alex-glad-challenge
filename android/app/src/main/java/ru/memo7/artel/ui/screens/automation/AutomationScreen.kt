@@ -320,7 +320,7 @@ private fun RuleCard(
             ) {
                 Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text(if (running) "Запускаем…" else "Запустить сейчас")
+                Text(if (running) "Запускаем…" else "Запустить")
             }
             Button(
                 onClick = onEdit,

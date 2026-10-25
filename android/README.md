@@ -18,7 +18,7 @@ Native Android client for the «Артель» workspace web API. Kotlin + Jetpa
 
 ## Design
 
-Dark graphite base with electric violet (#8B7CFF) primary and lime (#C6F24E) secondary; oversized display typography; asymmetric bento cards with 28dp corners; animated XP ring; labeled bottom navigation; light theme as a full second palette.
+Warm oven palette: dark graphite base (#161110) with tomato (#FF5A36) primary, basil (#8FE36B) secondary and cheese (#FFB443) accent; light theme is a full second palette on paper (#FAF3EA). Oversized display typography, asymmetric bento cards with 28dp corners, animated XP ring. Bottom navigation is labeled at normal widths and icon-only on narrow screens or large font scale; full labels stay in accessibility descriptions.
 
 ## Architecture
 
