@@ -29,13 +29,14 @@ vi.mock('../../lib/server/challenge', () => ({
   dataPath: vi.fn((p: string) => p),
 }));
 
+let GET: (req: NextRequest, ctx: { params: Promise<{ slug: string }> }) => Promise<Response>;
 let PATCH: (req: NextRequest, ctx: { params: Promise<{ slug: string }> }) => Promise<Response>;
 let createSessionValue: () => string;
 
 // Динамический импорт обязателен: vi.mock выше должен примениться ДО оценки
 // route-модуля (канонический паттерн route-тестов, AGENTS §9.4).
 beforeAll(async () => {
-  ({ PATCH } = await import('../../app/api/blogs/[slug]/route'));
+  ({ GET, PATCH } = await import('../../app/api/blogs/[slug]/route'));
   ({ createSessionValue } = await import('../../lib/auth'));
 });
 
@@ -44,7 +45,19 @@ beforeEach(() => {
   mocks.updateBlog.mockReset();
   mocks.listProfiles.mockReset();
   // Дефолт: блог найден, updateBlog «сохраняет» — getBlogBySlug отдаёт патченный блог.
-  const blog = { id: 1, slug: 'main', name: 'Главный', style_preset: 'default' };
+  const blog = {
+    id: 1,
+    slug: 'main',
+    name: 'Главный',
+    profile: null,
+    style_preset: 'default',
+    tg_chat_id: null,
+    sources: null,
+    system_prompt: null,
+    context_prompt: null,
+    created_at: '2026-01-01T00:00:00Z',
+  };
+  mocks.listProfiles.mockReturnValue([]);
   mocks.getBlogBySlug.mockImplementation(() => blog);
   mocks.updateBlog.mockImplementation((_id: number, patch: Record<string, unknown>) => {
     Object.assign(blog, patch);
@@ -157,5 +170,72 @@ describe('PATCH /api/blogs/[slug] — контракт', () => {
     await expect(res.json()).resolves.toMatchObject({ ok: true });
     expect(mocks.updateBlog).toHaveBeenCalledTimes(1);
     expect(mocks.updateBlog).toHaveBeenCalledWith(1, {});
+  });
+
+  it('systemPrompt/contextPrompt → snake_case в БД', async () => {
+    const res = await PATCH(
+      patchReq({ systemPrompt: 'Ты храмовой автор.', contextPrompt: 'Аудитория — прихожане.' }),
+      ctx('main'),
+    );
+    expect(res.status).toBe(200);
+    expect(mocks.updateBlog).toHaveBeenCalledWith(1, {
+      system_prompt: 'Ты храмовой автор.',
+      context_prompt: 'Аудитория — прихожане.',
+    });
+  });
+
+  it('пустые промпты → null (очистка override)', async () => {
+    const res = await PATCH(patchReq({ systemPrompt: '', contextPrompt: '   ' }), ctx('main'));
+    expect(res.status).toBe(200);
+    expect(mocks.updateBlog).toHaveBeenCalledWith(1, {
+      system_prompt: null,
+      context_prompt: null,
+    });
+  });
+});
+
+describe('GET /api/blogs/[slug] — полный конфиг', () => {
+  function getReq(auth: { bearer?: boolean } = { bearer: true }): NextRequest {
+    const headers: Record<string, string> = {};
+    if (auth.bearer) headers.authorization = `Bearer ${MOBILE_TOKEN}`;
+    return new NextRequest('http://127.0.0.1:3000/api/blogs/main', { method: 'GET', headers });
+  }
+
+  it('без auth → 401', async () => {
+    const res = await GET(getReq({}), ctx('main'));
+    expect(res.status).toBe(401);
+  });
+
+  it('возвращает промпты и разобранные источники', async () => {
+    mocks.listProfiles.mockReturnValue(['main']);
+    mocks.getBlogBySlug.mockReturnValue({
+      id: 1,
+      slug: 'main',
+      name: 'Главный',
+      profile: 'main',
+      style_preset: 'default',
+      tg_chat_id: '-100123',
+      sources: JSON.stringify(['https://a.example/rss']),
+      system_prompt: 'Пиши тепло.',
+      context_prompt: 'Не выдумывай цитаты.',
+      created_at: '2026-01-01T00:00:00Z',
+    });
+    const res = await GET(getReq(), ctx('main'));
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      blog: {
+        slug: 'main',
+        hasProfile: true,
+        systemPrompt: 'Пиши тепло.',
+        contextPrompt: 'Не выдумывай цитаты.',
+        sources: ['https://a.example/rss'],
+      },
+    });
+  });
+
+  it('неизвестный slug → 404', async () => {
+    mocks.getBlogBySlug.mockReturnValue(null);
+    const res = await GET(getReq(), ctx('ghost'));
+    expect(res.status).toBe(404);
   });
 });

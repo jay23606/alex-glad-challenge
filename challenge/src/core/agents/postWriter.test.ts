@@ -70,6 +70,34 @@ test('postWriter: preset antonov — system-пресет поверх профи
   }
 });
 
+test('postWriter: explicit system/context prompt блога перекрывают пресет и не тянут чужой голос', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'pw-'));
+  const db = new BlogDb(path.join(dir, 'blog.sqlite'));
+  try {
+    const blog = db.getBlogBySlug('artemia-artel')!;
+    db.updateBlog(blog.id, {
+      system_prompt: 'Ты — голос храмовой общины. Пиши тепло и просто.',
+      context_prompt: 'Аудитория — прихожане и соседи. Не выдумывай цитаты.',
+    });
+
+    const captured: ChatMessage[][] = [];
+    const writer = new PostWriter(fakeClient(captured));
+    await writer.write(db, NEWS, { blogId: blog.id });
+
+    const messages = captured[0];
+    const system = messages[0].content;
+    assert.match(system, /голос храмовой общины/);
+    assert.match(system, /КОНТЕКСТ БЛОГА/);
+    assert.match(system, /Не выдумывай цитаты/);
+    assert.match(system, /Артемия Артель/);
+    assert.ok(!system.includes('@lookatfacts'), 'чужой подписи нет');
+    assert.ok(!system.includes('Перепиши текст пользователя'), 'пресет не подмешивается');
+  } finally {
+    db.close();
+    safeRm(dir);
+  }
+});
+
 test('postWriter: preset default — старое поведение (профиль + few-shot)', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'pw-'));
   const db = new BlogDb(path.join(dir, 'blog.sqlite'));

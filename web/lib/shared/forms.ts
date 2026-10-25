@@ -301,14 +301,17 @@ export const digestGenerateSchema = z.object({
 export type DigestGenerateInput = z.infer<typeof digestGenerateSchema>;
 
 // PATCH /api/blogs/[slug] — настройка блога (имя, профиль голоса, TG-чат,
-// RSS-источники, пресет стиля). profile: имя из /chat-профилей или null (сброс).
-// sources: массив http(s)-URL (≤20); [] сбрасывает на дефолтные фиды (null в БД).
-// stylePreset: значения синхронны с core stylePreset.ts (shared не импортирует core).
+// RSS-источники, пресет стиля, per-blog промпты). profile: имя из /chat-профилей
+// или null (сброс). sources: массив http(s)-URL (≤20); [] сбрасывает на дефолтные
+// фиды (null в БД). stylePreset: значения синхронны с core stylePreset.ts (shared
+// не импортирует core). systemPrompt/contextPrompt: null или '' очищают значение.
 export const blogPatchSchema = z.object({
   name: z.string().trim().min(1, 'Имя обязательно').max(120).optional(),
   profile: z.string().trim().max(100).nullable().optional(),
   tgChatId: z.string().trim().max(100).nullable().optional(),
   stylePreset: z.enum(['default', 'antonov']).optional(),
+  systemPrompt: z.string().max(8000, 'System prompt: до 8000 символов').nullable().optional(),
+  contextPrompt: z.string().max(8000, 'Context prompt: до 8000 символов').nullable().optional(),
   sources: z
     .array(
       z

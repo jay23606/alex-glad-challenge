@@ -165,8 +165,9 @@ export default function BlogPostsPage() {
           Новый блог: задайте RSS-источники и профиль голоса через{' '}
           <code className="font-mono text-[11px]">PATCH /api/blogs/&lt;slug&gt;</code>.
           Профиль голоса создаётся в <Link href="/chat" className="text-accent hover:underline">/chat</Link>{' '}
-          командой <code className="font-mono text-[11px]">/profile</code>. Без профиля и
-          источников генерация для блога недоступна.
+          командой <code className="font-mono text-[11px]">/profile</code>. Промпты, расписание
+          и праздничные посты — в{' '}
+          <Link href="/blog/settings" className="text-accent hover:underline">/blog/settings</Link>.
         </p>
       </Card>
 

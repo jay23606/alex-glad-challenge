@@ -60,6 +60,51 @@ test('db: updateBlog меняет style_preset, повторное открыт�
   }
 });
 
+test('db: system/context prompt — миграция легаси-базы и persist между открытиями', () => {
+  const { dir, file } = tmpDb();
+  const legacy = new DatabaseSync(file);
+  legacy.exec(`
+    CREATE TABLE blogs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      slug TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      profile TEXT,
+      tg_chat_id TEXT,
+      sources TEXT,
+      style_preset TEXT NOT NULL DEFAULT 'default',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+  legacy
+    .prepare('INSERT INTO blogs (slug, name, profile, tg_chat_id, sources) VALUES (?, ?, ?, ?, ?)')
+    .run('nevsky-hram', 'Невский храм', null, null, null);
+  legacy.close();
+
+  let db = new BlogDb(file);
+  try {
+    const blog = db.getBlogBySlug('nevsky-hram')!;
+    assert.equal(blog.system_prompt, null);
+    assert.equal(blog.context_prompt, null);
+    db.updateBlog(blog.id, {
+      system_prompt: 'Пиши как прихожанин, тепло.',
+      context_prompt: 'Настоятель — отец N.',
+    });
+  } finally {
+    db.close();
+  }
+  db = new BlogDb(file);
+  try {
+    const blog = db.getBlogBySlug('nevsky-hram')!;
+    assert.equal(blog.system_prompt, 'Пиши как прихожанин, тепло.');
+    assert.equal(blog.context_prompt, 'Настоятель — отец N.');
+    db.updateBlog(blog.id, { system_prompt: null, context_prompt: null });
+    assert.equal(db.getBlogBySlug('nevsky-hram')?.system_prompt, null);
+  } finally {
+    db.close();
+    safeRm(dir);
+  }
+});
+
 test('db: миграция легаси-базы — ALTER blogs + antonov блогу «Факты», идемпотентно', () => {
   const { dir, file } = tmpDb();
   // Легаси-схема: blogs без style_preset, с одним блогом «Факты».

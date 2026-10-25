@@ -21,6 +21,8 @@ function blog(id: number, slug: string, name: string): BlogRow {
     tg_chat_id: null,
     sources: null,
     style_preset: 'default',
+    system_prompt: null,
+    context_prompt: null,
     created_at: '2026-01-01T00:00:00.000Z',
   };
 }

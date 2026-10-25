@@ -22,6 +22,8 @@ export interface BlogRow {
   tg_chat_id: string | null; // chat_id TG-канала блога; null = общий TG_CHAT_ID
   sources: string | null;    // JSON-массив URL RSS; null = дефолтные футбольные фиды
   style_preset: StylePreset; // пресет стиля (stylePreset.ts); 'default' = профиль + few-shot
+  system_prompt: string | null;  // per-blog override системного промпта; null = пресет/шаблон
+  context_prompt: string | null; // постоянный контекст блога (факты, аудитория, тон)
   created_at: string;
 }
 
@@ -32,9 +34,9 @@ export const DEFAULT_BLOG_SLUG = 'lookatfacts';
 // двух новых блогов заполняются позже (PATCH /api/blogs/[slug], профили — /chat).
 // Блог «Факты» (lookatfacts) пишет пресетом Антонова (stylePreset.ts).
 const SEED_BLOGS: Array<Omit<BlogRow, 'id' | 'created_at'>> = [
-  { slug: DEFAULT_BLOG_SLUG, name: 'Иди на факты глянь', profile: 'default', tg_chat_id: null, sources: null, style_preset: 'antonov' },
-  { slug: 'artemia-artel', name: 'Артемия Артель', profile: null, tg_chat_id: null, sources: null, style_preset: 'default' },
-  { slug: 'nevsky-hram', name: 'Невский храм на Доваторцев', profile: null, tg_chat_id: null, sources: null, style_preset: 'default' },
+  { slug: DEFAULT_BLOG_SLUG, name: 'Иди на факты глянь', profile: 'default', tg_chat_id: null, sources: null, style_preset: 'antonov', system_prompt: null, context_prompt: null },
+  { slug: 'artemia-artel', name: 'Артемия Артель', profile: null, tg_chat_id: null, sources: null, style_preset: 'default', system_prompt: null, context_prompt: null },
+  { slug: 'nevsky-hram', name: 'Невский храм на Доваторцев', profile: null, tg_chat_id: null, sources: null, style_preset: 'default', system_prompt: null, context_prompt: null },
 ];
 
 export interface NewsRow {
@@ -74,6 +76,8 @@ CREATE TABLE IF NOT EXISTS blogs (
   tg_chat_id TEXT,
   sources TEXT,
   style_preset TEXT NOT NULL DEFAULT 'default',
+  system_prompt TEXT,
+  context_prompt TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -136,6 +140,14 @@ export class BlogDb {
       this.db
         .prepare(`UPDATE blogs SET style_preset = 'antonov' WHERE slug = ?`)
         .run(DEFAULT_BLOG_SLUG);
+    }
+    // Per-blog промпты: явный system_prompt замещает пресет/шаблон, context_prompt
+    // добавляет постоянный контекст. Старые БД получают NULL — поведение не меняется.
+    if (!this.hasColumn('blogs', 'system_prompt')) {
+      this.db.exec('ALTER TABLE blogs ADD COLUMN system_prompt TEXT');
+    }
+    if (!this.hasColumn('blogs', 'context_prompt')) {
+      this.db.exec('ALTER TABLE blogs ADD COLUMN context_prompt TEXT');
     }
     // На базах, созданных до мульти-блога, колонок нет — ALTER + разовый бэкфилл
     // всего существующего контента в блог по умолчанию. На свежей БД колонки уже
@@ -202,11 +214,27 @@ export class BlogDb {
 
   updateBlog(
     id: number,
-    patch: { name?: string; profile?: string | null; tg_chat_id?: string | null; sources?: string | null; style_preset?: StylePreset },
+    patch: {
+      name?: string;
+      profile?: string | null;
+      tg_chat_id?: string | null;
+      sources?: string | null;
+      style_preset?: StylePreset;
+      system_prompt?: string | null;
+      context_prompt?: string | null;
+    },
   ): void {
     const sets: string[] = [];
     const values: Array<string | null> = [];
-    for (const key of ['name', 'profile', 'tg_chat_id', 'sources', 'style_preset'] as const) {
+    for (const key of [
+      'name',
+      'profile',
+      'tg_chat_id',
+      'sources',
+      'style_preset',
+      'system_prompt',
+      'context_prompt',
+    ] as const) {
       const val = patch[key];
       if (val !== undefined) {
         sets.push(`${key} = ?`);
