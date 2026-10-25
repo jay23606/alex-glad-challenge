@@ -1582,3 +1582,57 @@ E2E-данные после прогона вычищены: проект «Andr
 `web/app/blog/posts/[id]/page.tsx`, `web/app/integrations/page.tsx`,
 `web/app/components/Nav.tsx`, `web/app/api/blogs/[slug]/route.ts`,
 `web/test/**`, `challenge/src/core/agents/automationRun.test.ts`.
+
+## Android: вход по паролю вместо URL/API-токена (2026-10-25)
+**Дата:** 2026-10-25. Профиль «Бизнес-фича».
+
+**Что сделано:**
+- `POST /api/mobile/login`: пароль рабочего пространства
+  (`WEB_ADMIN_PASSWORD`) → stateless session-токен (тот же `createSessionValue()`,
+  HMAC, TTL 7 дней); cookie не выдаётся. Rate-limit общий с `/api/auth/login`
+  (10 неудач / 15 мин, `Retry-After: 900`), 503 при незаданном auth-env.
+- `isMobileAuthed` принимает session-токен как `Authorization: Bearer` наравне
+  со статическим `MOBILE_API_TOKEN` (остаётся для автоматизации). Входной
+  endpoint добавлен в `PUBLIC_PATHS`; остальные `/api/*` по-прежнему закрыты.
+- Android: адрес сервера зашивается при сборке
+  (`-Partel.serverUrl=...`, в APK не коммитится); первый экран — только
+  «Пароль» + «Войти», без «Адрес сервера»/«API-токен». Токен сохраняется
+  в DataStore только после успешного `bootstrap`; 401 очищает сессию и
+  возвращает на вход. Версия 1.0.1 (versionCode 2).
+- Android: после успешного входа состояние `ConnectViewModel` сбрасывается —
+  иначе после logout/401 экран входа оставался с busy-спиннером и старым
+  паролем (P1, найден ревью и подтверждён на эмуляторе). 401 теперь чистит
+  токен только если он всё ещё тот, которым шёл запрос (`clearTokenIf`), —
+  поздний ответ старого запроса не разлогинивает после повторного входа.
+- Docs: контракт в `docs/api-contracts.md`, `docs/AUTHORIZATION.md`
+  (мобильный Bearer, границы `requireAuth`, отсутствие отзыва),
+  пояснение в `.env.example`, обновлённый `android/README.md`.
+
+**Проверки:** `pnpm --filter web typecheck` — чисто; `pnpm --filter web exec
+vitest run --maxWorkers=2` — 516/516 (+23 теста: Bearer-middleware, TTL/подмена
+exp, частичный env, общий rate-limit, cookie-вход); `pnpm --filter challenge
+typecheck` — чисто; Android `:app:testDebugUnitTest :app:assembleDebug` —
+успешно; эмулятор: неверный пароль → сообщение 401, верный пароль → дашборд
+с реальными данными, logout в том же процессе → чистый экран входа с активной
+кнопкой, повторный вход работает; финальный APK с Tailscale-адресом проверен
+на эмуляторе против dev-сервера, поднятого на tailnet-интерфейсе.
+
+**Риски/ограничения:** сборка debug, HTTP только внутри tailnet; production
+требует HTTPS и release-подписи. Сервер должен быть запущен и доступен с
+телефона по Tailscale; вне tailnet приложение не подключится. Пароль — общий
+админский, на устройстве не хранится; сессия живёт 7 дней, затем вход
+повторяется. Публичный доступ «любому установившему» потребовал бы отдельного
+демо-режима/ролей и намеренно не открыт.
+
+**Код:** `web/app/api/mobile/login/route.ts`,
+`web/lib/server/loginRateLimit.ts`, `web/lib/auth.ts`, `web/middleware.ts`,
+`web/app/api/auth/login/route.ts`, `web/test/unit/mobile-*.spec.ts`,
+`web/test/unit/auth-login-route.spec.ts`,
+`web/test/unit/login-rate-limit.spec.ts`, `docs/AUTHORIZATION.md`,
+`android/app/build.gradle.kts`,
+`android/app/src/main/java/ru/memo7/artel/ui/screens/connect/ConnectScreen.kt`,
+`android/.../data/api/AuthApi.kt`, `android/.../core/network/ApiFactory.kt`,
+`android/.../data/CredentialsStore.kt`, `android/.../data/ArtelRepository.kt`,
+`android/app/src/test/java/ru/memo7/artel/data/NormalizeBaseUrlTest.kt`,
+`android/app/src/test/java/ru/memo7/artel/data/api/AuthApiContractTest.kt`,
+`android/README.md`.

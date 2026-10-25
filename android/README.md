@@ -4,7 +4,7 @@ Native Android client for the «Артель» workspace web API. Kotlin + Jetpa
 
 ## Features
 
-- **Подключение** — server URL + bearer token, persisted in DataStore, validated against `GET /api/mobile/bootstrap`. The token never leaves the device (no hardcoding, no logging).
+- **Подключение** — вход по паролю рабочего пространства (`POST /api/mobile/login`); сервер преднастраивается при сборке через Gradle property `artel.serverUrl`, а выданная сессия (token) хранится в DataStore и проверяется `GET /api/mobile/bootstrap`. Пароль нигде не сохраняется и не зашивается в APK.
 - **Главная** — XP level ring, streak, achievements, workspace counts, notification badge.
 - **Геймификация** — XP/уровень с кольцом прогресса, серия и рекорд, достижения (открытые/закрытые) и журнал очков (`GET /api/gamification`); вход — тап по кольцу уровня или карточке достижения на главной.
 - **Проекты** — list, create (name/description/color), project detail with notes/tasks/links, done toggling, item creation.
@@ -24,7 +24,7 @@ Warm oven palette: dark graphite base (#161110) with tomato (#FF5A36) primary, b
 
 Single module `:app`, package `ru.memo7.artel`.
 
-- Retrofit + OkHttp + kotlinx.serialization (`core/network`), bearer-token interceptor, typed errors (`401` → «Неверный токен»).
+- Retrofit + OkHttp + kotlinx.serialization (`core/network`), bearer-token interceptor, typed errors (`401` → «Сессия истекла. Войдите заново.» с автоматическим выходом на экран входа).
 - Repository with small in-memory caches for instant re-entry (`data/ArtelRepository.kt`).
 - Manual DI via `AppContainer` (`di/`), ViewModels with `StateFlow`, `loading/error/empty` states on every screen.
 - DataStore preferences for credentials + theme (`data/CredentialsStore.kt`).
@@ -97,8 +97,21 @@ The debug APK lands in `app/build/outputs/apk/debug/app-debug.apk` (~17 МБ). I
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
-In the app, enter your server origin (for the emulator: `http://10.0.2.2:3000`) and a valid `MOBILE_API_TOKEN`, then tap «Подключиться».
+In the app, enter the workspace password and tap «Войти» (builds without `artel.serverUrl` additionally ask for the server origin, see below).
+
+## Сервер и вход
+
+- **Адрес сервера при сборке.** По умолчанию приложение собирается с пустым адресом и показывает поле «Адрес сервера» (dev-fallback). Чтобы зашить адрес в APK, передайте Gradle property при сборке — он попадёт в `BuildConfig.DEFAULT_SERVER_URL`:
+
+  ```bash
+  .\gradlew.bat :app:assembleDebug -Partel.serverUrl=http://192.168.1.50:3000   # Windows
+  ./gradlew :app:assembleDebug -Partel.serverUrl=https://artel.example.com      # Linux/macOS
+  ```
+
+  Личный адрес в репозиторий не коммитится: передавайте его только в команде сборки или в локальном `gradle.properties` вне git.
+- **Вход по паролю.** На экране входа — только пароль рабочего пространства: `POST /api/mobile/login` возвращает session token, приложение проверяет подключение `GET /api/mobile/bootstrap` и сохраняет токен в DataStore. Неверный пароль — «Неверный пароль»; пароль на устройстве не хранится. Токен живёт 7 дней; 401 от любого API-запроса означает «Сессия истекла. Войдите заново.» и возвращает на экран входа: сборка с `artel.serverUrl` использует тот же адрес, dev-сборка подставляет последний введённый.
+- **Доступность сервера.** Телефон должен достучаться до сервера напрямую: в той же Wi-Fi/LAN-сети (адрес вида `http://192.168.x.x:3000`) или через VPN вроде Tailscale. Эмулятору доступен `http://10.0.2.2:3000` (host-машина). Cleartext-HTTP разрешён только в debug-сборках; для продакшена используйте HTTPS за reverse-proxy.
 
 ## API
 
-All endpoints under `/api/*` from the shared project contract; every request carries `Authorization: Bearer <token>`. Errors are surfaced as typed messages in Russian; 401 always means «Неверный токен доступа».
+All endpoints under `/api/*` from the shared project contract; every workspace request carries `Authorization: Bearer <token>`. Вход — `POST api/mobile/login` (`{ password }` → `{ ok, token, expiresAt }`). Errors are surfaced as typed messages in Russian; 401 always means «Сессия истекла. Войдите заново.».

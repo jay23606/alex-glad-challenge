@@ -3,7 +3,7 @@ package ru.memo7.artel.core.network
 /** Typed API failure surfaced to ViewModels. */
 sealed class ApiError(message: String) : Exception(message) {
     class Network(cause: Throwable) : ApiError("Сервер недоступен: ${cause.message ?: "нет соединения"}")
-    class Unauthorized : ApiError("Неверный токен доступа")
+    class Unauthorized : ApiError("Сессия истекла. Войдите заново.")
     class Server(val code: Int, body: String) : ApiError("Ошибка сервера ($code): ${body.ifBlank { "нет описания" }}")
     class BadResponse(message: String) : ApiError(message)
 }

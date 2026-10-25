@@ -61,24 +61,34 @@ class ArtelRepository(private val store: CredentialsStore) {
     @Volatile var cachedTodos: TodosResponse? = null
         private set
 
-    private suspend fun api(): ArtelApi {
+    private suspend fun api(): Pair<Credentials, ArtelApi> {
         val credentials = store.settings.first().credentials
             ?: throw ApiError.BadResponse("Нет сохранённого подключения к серверу")
-        apiHolder?.let { (known, api) -> if (known == credentials) return api }
+        apiHolder?.let { (known, api) -> if (known == credentials) return known to api }
         val fresh = ApiFactory.create(credentials)
         apiHolder = credentials to fresh
-        return fresh
+        return credentials to fresh
     }
 
     private suspend fun <T> call(block: suspend (ArtelApi) -> T): ApiResult<T> =
         withContext(Dispatchers.IO) {
+            var usedToken: String? = null
             try {
-                ApiResult.Success(block(api()))
+                val (credentials, api) = api()
+                usedToken = credentials.token
+                ApiResult.Success(block(api))
             } catch (e: CancellationException) {
                 // Отмена (например, запрос вытеснен новым поиском) — не сетевая ошибка.
                 throw e
             } catch (e: HttpException) {
+                // Только если сессия всё ещё та, которой шёл запрос: поздний 401
+                // от старого запроса не должен разлогинить после повторного входа.
+                if (e.code() == 401) usedToken?.let { store.clearTokenIf(it) }
                 ApiResult.Failure(e.toApiError())
+            } catch (e: ApiError.Unauthorized) {
+                // requireSuccess тоже бросает Unauthorized, но внутри block — до call не «доходит мимо».
+                usedToken?.let { store.clearTokenIf(it) }
+                ApiResult.Failure(e)
             } catch (e: ApiError) {
                 ApiResult.Failure(e)
             } catch (e: java.io.IOException) {

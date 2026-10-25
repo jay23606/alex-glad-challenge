@@ -13,8 +13,18 @@ android {
         applicationId = "ru.memo7.artel"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.1"
+
+        // Адрес сервера преднастраивается при сборке: -Partel.serverUrl=https://...
+        // Пустое значение — ручной ввод URL как dev-fallback; личный адрес не коммитится.
+        val bakedServerUrl = providers.gradleProperty("artel.serverUrl").orNull.orEmpty().trim()
+        val escapedServerUrl = bakedServerUrl
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\r", "\\r")
+            .replace("\n", "\\n")
+        buildConfigField("String", "DEFAULT_SERVER_URL", "\"$escapedServerUrl\"")
     }
 
     buildTypes {
@@ -35,6 +45,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     lint {

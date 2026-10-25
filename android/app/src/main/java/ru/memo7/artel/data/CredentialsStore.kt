@@ -18,13 +18,16 @@ data class Credentials(
     val token: String,
 ) {
     /** Normalized origin with scheme and trailing slash, ready for Retrofit. */
-    fun toRetrofitBaseUrl(): String {
-        var url = baseUrl.trim().trimEnd('/')
-        if (!url.startsWith("http://") && !url.startsWith("https://")) {
-            url = "http://$url"
-        }
-        return "$url/"
+    fun toRetrofitBaseUrl(): String = normalizeBaseUrl(baseUrl)
+}
+
+/** Single URL-normalization rules for both Retrofit clients (token and login). */
+fun normalizeBaseUrl(baseUrl: String): String {
+    var url = baseUrl.trim().trimEnd('/')
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+        url = "http://$url"
     }
+    return "$url/"
 }
 
 data class AppSettings(
@@ -73,6 +76,23 @@ class CredentialsStore(file: File) {
         dataStore.edit { prefs ->
             prefs.remove(Keys.serverUrl)
             prefs.remove(Keys.token)
+        }
+    }
+
+    /** Истёкшая сессия: удаляем только токен, адрес сервера остаётся подставленным. */
+    suspend fun clearToken() {
+        dataStore.edit { prefs ->
+            prefs.remove(Keys.token)
+        }
+    }
+
+    /**
+     * Удаляет токен, только если он всё ещё тот, с которым упал запрос.
+     * Поздний 401 от старого in-flight запроса не должен стирать свежую сессию.
+     */
+    suspend fun clearTokenIf(token: String) {
+        dataStore.edit { prefs ->
+            if (prefs[Keys.token] == token) prefs.remove(Keys.token)
         }
     }
 

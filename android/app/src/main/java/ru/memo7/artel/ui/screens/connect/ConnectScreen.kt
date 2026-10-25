@@ -51,17 +51,19 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
-import ru.memo7.artel.core.network.ApiError
+import ru.memo7.artel.BuildConfig
 import ru.memo7.artel.core.network.ApiFactory
-import ru.memo7.artel.core.network.ApiResult
 import ru.memo7.artel.data.Credentials
 import ru.memo7.artel.data.CredentialsStore
+import ru.memo7.artel.data.api.ErrorResponse
+import ru.memo7.artel.data.api.LoginRequest
 import ru.memo7.artel.di.AppContainer
 import ru.memo7.artel.ui.theme.ArtelShapes
 import ru.memo7.artel.ui.theme.Cheese
@@ -69,75 +71,134 @@ import ru.memo7.artel.ui.theme.Tomato
 
 data class ConnectUiState(
     val serverUrl: String = "",
-    val token: String = "",
+    val password: String = "",
     val busy: Boolean = false,
     val error: String? = null,
 )
 
-class ConnectViewModel(private val store: CredentialsStore) : ViewModel() {
+class ConnectViewModel(
+    private val store: CredentialsStore,
+    private val bakedServerUrl: String,
+) : ViewModel() {
 
     private val _state = MutableStateFlow(ConnectUiState())
     val state: StateFlow<ConnectUiState> = _state.asStateFlow()
 
+    /** true — адрес зашит при сборке, поле URL скрыто; false — dev-fallback с ручным вводом. */
+    val hasBakedUrl: Boolean = bakedServerUrl.isNotBlank()
+
     init {
-        viewModelScope.launch {
-            store.lastServerUrl.collect { url ->
-                if (!url.isNullOrBlank()) {
-                    _state.update { it.copy(serverUrl = it.serverUrl.ifBlank { url }) }
+        if (!hasBakedUrl) {
+            viewModelScope.launch {
+                store.lastServerUrl.collect { url ->
+                    if (!url.isNullOrBlank()) {
+                        _state.update { it.copy(serverUrl = it.serverUrl.ifBlank { url }) }
+                    }
                 }
             }
         }
     }
 
     fun onUrlChange(value: String) = _state.update { it.copy(serverUrl = value, error = null) }
-    fun onTokenChange(value: String) = _state.update { it.copy(token = value, error = null) }
+    fun onPasswordChange(value: String) = _state.update { it.copy(password = value, error = null) }
 
     fun connect() {
         val current = _state.value
         if (current.busy) return
-        val url = current.serverUrl.trim()
-        val token = current.token.trim()
-        if (url.isEmpty() || token.isEmpty()) {
-            _state.update { it.copy(error = "Введите адрес сервера и токен") }
+        val url = (if (hasBakedUrl) bakedServerUrl else current.serverUrl).trim()
+        val password = current.password.trim()
+        if (url.isEmpty()) {
+            _state.update { it.copy(error = "Введите адрес сервера") }
+            return
+        }
+        if (password.isEmpty()) {
+            _state.update { it.copy(error = "Введите пароль") }
             return
         }
         _state.update { it.copy(busy = true, error = null) }
         viewModelScope.launch {
+            val token = login(url, password) ?: return@launch
+            // Токен сохраняем только после успешного bootstrap — значит, подключение реально работает.
             val credentials = Credentials(url, token)
-            val api = try {
-                ApiFactory.create(credentials)
-            } catch (e: IllegalArgumentException) {
-                _state.update { it.copy(busy = false, error = "Некорректный адрес сервера") }
-                return@launch
-            }
-            val result = try {
-                ApiResult.Success(api.bootstrap())
-            } catch (e: HttpException) {
-                // 401 — обещанное «Неверный токен доступа»; остальной HTTP — как раньше.
-                if (e.code() == 401) ApiResult.Failure(ApiError.Unauthorized())
-                else ApiResult.Failure(ApiError.Network(e))
-            } catch (e: ApiError) {
-                ApiResult.Failure(e)
-            } catch (e: java.io.IOException) {
-                ApiResult.Failure(ApiError.Network(e))
-            } catch (e: Exception) {
-                ApiResult.Failure(ApiError.Network(e))
-            }
-            when (result) {
-                is ApiResult.Success -> store.saveCredentials(credentials)
-                is ApiResult.Failure -> _state.update {
-                    it.copy(busy = false, error = result.error.message ?: "Не удалось подключиться")
-                }
-            }
+            if (!bootstrap(credentials)) return@launch
+            store.saveCredentials(credentials)
+            // ViewModel живёт в Activity-scope и переиспользуется после logout/401.
+            // Без сброса следующий экран входа показал бы старый пароль и busy-спиннер.
+            _state.value = ConnectUiState()
         }
+    }
+
+    /** POST api/mobile/login; при ошибке показывает сообщение и возвращает null. */
+    private suspend fun login(url: String, password: String): String? {
+        val authApi = try {
+            ApiFactory.createAuth(url)
+        } catch (e: IllegalArgumentException) {
+            _state.update { it.copy(busy = false, error = "Некорректный адрес сервера") }
+            return null
+        }
+        return try {
+            val response = authApi.login(LoginRequest(password))
+            if (!response.ok || response.token.isNullOrBlank()) {
+                fail(response.error?.takeIf { it.isNotBlank() } ?: "Не удалось войти")
+                null
+            } else {
+                response.token
+            }
+        } catch (e: HttpException) {
+            fail(
+                if (e.code() == 401) "Неверный пароль"
+                else "Ошибка сервера (${e.code()}): ${e.errorText().ifBlank { "нет описания" }}"
+            )
+            null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: java.io.IOException) {
+            fail("Сервер недоступен: ${e.message ?: "нет соединения"}")
+            null
+        } catch (e: Exception) {
+            fail("Сервер недоступен: ${e.message ?: "нет соединения"}")
+            null
+        }
+    }
+
+    /** Проверяет подключение bootstrap-запросом; пароль нигде не сохраняется. */
+    private suspend fun bootstrap(credentials: Credentials): Boolean = try {
+        ApiFactory.create(credentials).bootstrap()
+        true
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: HttpException) {
+        fail("Ошибка сервера (${e.code()}): ${e.errorText().ifBlank { "нет описания" }}")
+        false
+    } catch (e: java.io.IOException) {
+        fail("Сервер недоступен: ${e.message ?: "нет соединения"}")
+        false
+    } catch (e: Exception) {
+        fail("Сервер недоступен: ${e.message ?: "нет соединения"}")
+        false
+    }
+
+    private fun fail(message: String) = _state.update { it.copy(busy = false, error = message) }
+
+    private fun HttpException.errorText(): String {
+        val body = try {
+            response()?.errorBody()?.string().orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
+        return runCatching {
+            ApiFactory.json.decodeFromString(ErrorResponse.serializer(), body).error
+        }.getOrNull() ?: body.take(200)
     }
 }
 
-/** Entry screen: server URL + bearer token, validated against /api/mobile/bootstrap. */
+/** Entry screen: password login; the server URL is baked at build time, a manual field stays only as dev fallback. */
 @Composable
 fun ConnectScreen(container: AppContainer) {
     val vm: ConnectViewModel = viewModel(
-        factory = viewModelFactory { initializer { ConnectViewModel(container.credentialsStore) } }
+        factory = viewModelFactory {
+            initializer { ConnectViewModel(container.credentialsStore, BuildConfig.DEFAULT_SERVER_URL) }
+        }
     )
     val state by vm.state.collectAsStateWithLifecycle()
     val focusManager = LocalFocusManager.current
@@ -169,37 +230,39 @@ fun ConnectScreen(container: AppContainer) {
         Spacer(Modifier.height(20.dp))
         Text("Артель", style = MaterialTheme.typography.displayLarge, color = MaterialTheme.colorScheme.primary)
         Text(
-            "Подключитесь к серверу рабочего пространства",
+            "Войдите в рабочее пространство",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(28.dp))
 
+        if (!vm.hasBakedUrl) {
+            OutlinedTextField(
+                value = state.serverUrl,
+                onValueChange = vm::onUrlChange,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Адрес сервера") },
+                placeholder = { Text("http://10.0.2.2:3000") },
+                singleLine = true,
+                shape = ArtelShapes.chip,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+            )
+            Spacer(Modifier.height(12.dp))
+        }
+        var showPassword by remember { mutableStateOf(false) }
         OutlinedTextField(
-            value = state.serverUrl,
-            onValueChange = vm::onUrlChange,
+            value = state.password,
+            onValueChange = vm::onPasswordChange,
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Адрес сервера") },
-            placeholder = { Text("http://10.0.2.2:3000") },
+            label = { Text("Пароль") },
             singleLine = true,
             shape = ArtelShapes.chip,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-        )
-        Spacer(Modifier.height(12.dp))
-        var showToken by remember { mutableStateOf(false) }
-        OutlinedTextField(
-            value = state.token,
-            onValueChange = vm::onTokenChange,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("API-токен") },
-            singleLine = true,
-            shape = ArtelShapes.chip,
-            visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
+            visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
             trailingIcon = {
-                IconButton(onClick = { showToken = !showToken }) {
+                IconButton(onClick = { showPassword = !showPassword }) {
                     Icon(
-                        if (showToken) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                        contentDescription = if (showToken) "Скрыть токен" else "Показать токен",
+                        if (showPassword) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                        contentDescription = if (showPassword) "Скрыть пароль" else "Показать пароль",
                     )
                 }
             },
@@ -233,12 +296,12 @@ fun ConnectScreen(container: AppContainer) {
                     color = MaterialTheme.colorScheme.onPrimary,
                 )
             } else {
-                Text("Подключиться", style = MaterialTheme.typography.labelLarge)
+                Text("Войти", style = MaterialTheme.typography.labelLarge)
             }
         }
         Spacer(Modifier.height(16.dp))
         Text(
-            "Токен и адрес хранятся только на этом устройстве.",
+            "Пароль не сохраняется; на устройстве остаётся только сессия.",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

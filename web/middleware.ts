@@ -42,6 +42,9 @@ const PUBLIC_PATHS = new Set([
   '/api/health',
   '/api/auth/login',
   '/api/auth/logout',
+  // Мобильный вход (Артель): как /api/auth/login, сам эндпоинт обязан быть
+  // доступен без сессии — авторизацией служит пароль в теле запроса.
+  '/api/mobile/login',
   // Metadata-роуты (sitemap/robots/opengraph-image) публичны:
   // их читают краулеры и TG/OG-клиенты без cookie-сессии. Set — точное совпадение
   // pathname (query не входит), поэтому '/opengraph-image' покрывает и '/opengraph-image?<query>'.
@@ -78,7 +81,8 @@ export function middleware(request: NextRequest) {
   // --- Admin-auth гейт (day 36) ---
   const { pathname } = request.nextUrl;
   const cookieAuthed = isValidSession(request.cookies.get(SESSION_COOKIE)?.value);
-  // Мобильный клиент: Bearer MOBILE_API_TOKEN даёт доступ к /api/*, но не к страницам.
+  // Мобильный клиент: Bearer (session-токен из /api/mobile/login или статический
+  // MOBILE_API_TOKEN автоматизации) даёт доступ к /api/*, но не к страницам.
   const apiMobileAuthed = pathname.startsWith('/api') && isMobileAuthed(request);
   const authed = cookieAuthed || apiMobileAuthed;
   // Входящие webhooks (T7): POST /api/integrations/inbound/<id> — приём событий от

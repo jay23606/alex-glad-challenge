@@ -124,7 +124,7 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
                 }
             }
             Text(
-                "API-токен",
+                "Сессия",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -184,7 +184,7 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
             Text("  Выйти и очистить доступ", style = MaterialTheme.typography.labelLarge)
         }
         Text(
-            "Токен удаляется с устройства; адрес сервера запомнится для повторного входа.",
+            "Сессия удаляется с устройства; адрес сервера запомнится для повторного входа.",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 24.dp),
