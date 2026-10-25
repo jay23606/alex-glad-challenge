@@ -24,27 +24,27 @@ test.describe('Студия Антонова /antonov (админ)', () => {
     await expect(page.getByRole('heading', { name: 'Антонов такой Антонов', level: 1 })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Канал ↗' })).toBeVisible();
 
-    const textarea = page.getByLabel('Исходный текст');
+    const textarea = page.getByLabel('Ваш текст');
     await expect(textarea).toBeVisible();
 
     const submit = page.getByRole('button', { name: 'Переписать' });
     await expect(submit).toBeDisabled();
 
     // Чип примера подставляет исходник → кнопка оживает.
-    await page.getByRole('group', { name: 'Попробуйте на примере' }).getByRole('button').first().click();
+    await page.getByRole('group', { name: 'Готовые истории' }).getByRole('button').first().click();
     await expect(textarea).not.toHaveValue('');
     await expect(submit).toBeEnabled();
 
-    // Режим грубости: radio-семантика, дефолт «Обычный»; движок — дефолт «Облако».
-    await expect(page.getByRole('radio', { name: 'Обычный' })).toBeChecked();
-    await page.getByRole('radio', { name: 'Жёстко' }).click();
-    await expect(page.getByRole('radio', { name: 'Жёстко' })).toBeChecked();
+    // Тон: radio-семантика, дефолт «По-свойски»; движок — дефолт «Облако».
+    await expect(page.getByRole('radio', { name: 'По-свойски' })).toBeChecked();
+    await page.getByRole('radio', { name: 'Разнести' }).click();
+    await expect(page.getByRole('radio', { name: 'Разнести' })).toBeChecked();
     await expect(page.getByRole('radio', { name: 'Облако' })).toBeChecked();
-    await page.getByRole('radio', { name: 'Локально (Ollama)' }).click();
-    await expect(page.getByRole('radio', { name: 'Локально (Ollama)' })).toBeChecked();
+    await page.getByRole('radio', { name: 'Локально' }).click();
+    await expect(page.getByRole('radio', { name: 'Локально' })).toBeChecked();
 
-    await expect(page.getByLabel('Формат')).toBeVisible();
-    await expect(page.getByLabel('С подписью «быть добру»')).toBeVisible();
+    await expect(page.getByRole('radiogroup', { name: 'Формат' })).toBeVisible();
+    await expect(page.getByLabel('Фирменная подпись')).toBeVisible();
   });
 
   test('генерация с моком (движок «Локально»): пост появляется, история переживает перезагрузку, restore и удаление', async ({
@@ -68,10 +68,10 @@ test.describe('Студия Антонова /antonov (админ)', () => {
     });
     await login(page, '/antonov');
 
-    await page.getByLabel('Исходный текст').fill('Парковка у офиса станет платной с понедельника.');
-    await page.getByRole('radio', { name: 'Жёстко' }).click();
-    await page.getByRole('radio', { name: 'Локально (Ollama)' }).click();
-    await page.getByLabel('С подписью «быть добру»').check();
+    await page.getByLabel('Ваш текст').fill('Парковка у офиса станет платной с понедельника.');
+    await page.getByRole('radio', { name: 'Разнести' }).click();
+    await page.getByRole('radio', { name: 'Локально' }).click();
+    await page.getByLabel('Фирменная подпись').check();
     await page.getByRole('button', { name: 'Переписать' }).click();
 
     await expect(page.getByText(MOCK_POST)).toBeVisible({ timeout: 30_000 });
@@ -83,7 +83,7 @@ test.describe('Студия Антонова /antonov (админ)', () => {
 
     // Restore: клик по записи возвращает исходник и пост.
     await page.getByTitle('Открыть в студии').click();
-    await expect(page.getByLabel('Исходный текст')).toHaveValue(
+    await expect(page.getByLabel('Ваш текст')).toHaveValue(
       'Парковка у офиса станет платной с понедельника.',
     );
     await expect(page.getByText(MOCK_POST)).toBeVisible();
@@ -132,17 +132,17 @@ test.describe('Студия /antonov — режим «Поток-перевод�
     // и прячет формат/подпись одиночки.
     await expect(page.getByRole('radio', { name: 'Пост', exact: true })).toBeChecked();
     await page.getByRole('radio', { name: 'Поток-перевод' }).click();
-    await expect(page.getByLabel('Формат')).toBeHidden();
-    await expect(page.getByLabel('С подписью «быть добру»')).toBeHidden();
+    await expect(page.getByRole('radiogroup', { name: 'Формат' })).toBeHidden();
+    await expect(page.getByLabel('Фирменная подпись')).toBeHidden();
     await expect(page.getByLabel('Автор оригинала')).toBeVisible();
     await expect(page.getByLabel('Ссылка на источник')).toBeVisible();
     await expect(page.getByLabel('Картинки — по одной в строке')).toBeVisible();
 
-    await page.getByLabel('Исходный текст').fill('Длинный чужой разбор про полузащиту.');
+    await page.getByLabel('Ваш текст').fill('Длинный чужой разбор про полузащиту.');
     await page.getByLabel('Автор оригинала').fill('TheNearPost');
     await page.getByLabel('Ссылка на источник').fill('https://example.com/src');
     await page.getByLabel('Картинки — по одной в строке').fill('схема центра поля');
-    await page.getByRole('radio', { name: 'Жёстко' }).click();
+    await page.getByRole('radio', { name: 'Разнести' }).click();
     await page.getByRole('button', { name: 'Собрать поток' }).click();
 
     await expect(page.getByRole('heading', { name: /Поток · 3/i })).toBeVisible({ timeout: 30_000 });

@@ -1,19 +1,31 @@
 // /style — client-остров «Антоновайзера» (единственный client-компонент
-// страницы; паттерн DemoRagForm, светлый мир .lp). textarea (≤2000, счётчик) +
-// режим грубости (3 сегмента) + формат (select) + подпись (checkbox) +
-// чипы примеров → POST /api/style/rewrite по контракту:
+// страницы; паттерн DemoRagForm, светлый мир .lp). Продуктовый порядок:
+// текст → готовые истории (подставляют текст + тон + формат) → тон → формат →
+// подпись/движок → POST /api/style/rewrite по контракту:
 // 200 {ok,post} | 400/429/502/503 {ok:false,error,retryAfterSec?}.
 // Abort: размонтирование, новый запрос, клиентский таймаут 150с (LLM-провайдер
 // сам режет генерацию на 120-й). Результат — plain text + кнопка «Скопировать».
-// Импорты — только data/* (инвариант: client не тянет lib/server и @challenge).
+// Импорты — только data/* и общие controls (инвариант: client не тянет lib/server).
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   styleCopy,
+  styleFormatLabel,
+  styleToneLabel,
   type StyleExample,
+  type StyleFormat,
+  type StyleLlm,
+  type StyleTone,
 } from '../../data/style';
+import {
+  StyleEnginePicker,
+  StyleExampleCards,
+  StyleFormatPicker,
+  StyleSignatureToggle,
+  StyleTonePicker,
+} from '../components/style/StyleControls';
 import { useModelPrefDefault } from '../../lib/shared/use-model-pref';
 
 const FOCUS =
@@ -27,56 +39,61 @@ const MAX_TEXT = 2000; // контракт формы (zod на сервере �
 const TIMEOUT_CLOUD_MS = 150_000;
 const TIMEOUT_LOCAL_MS = 300_000;
 
-type Mode = 'soft' | 'normal' | 'hard';
-type Format = 'auto' | 'post' | 'essay' | 'guide' | 'calm';
-type Llm = 'cloud' | 'local';
 type Status = 'idle' | 'loading' | 'done' | 'error';
 
 interface RewriteResponse {
   ok: boolean;
   post?: string;
-  provider?: Llm;
+  provider?: StyleLlm;
   error?: string;
   retryAfterSec?: number;
 }
 
-const MODES: ReadonlyArray<{ id: Mode; label: string }> = [
-  { id: 'soft', label: styleCopy.modeSoft },
-  { id: 'normal', label: styleCopy.modeNormal },
-  { id: 'hard', label: styleCopy.modeHard },
-];
-
-const LLMS: ReadonlyArray<{ id: Llm; label: string }> = [
-  { id: 'cloud', label: styleCopy.llmCloud },
-  { id: 'local', label: styleCopy.llmLocal },
-];
-
-const FORMATS: ReadonlyArray<{ id: Format; label: string }> = [
-  { id: 'auto', label: styleCopy.formatAuto },
-  { id: 'post', label: styleCopy.formatPost },
-  { id: 'essay', label: styleCopy.formatEssay },
-  { id: 'guide', label: styleCopy.formatGuide },
-  { id: 'calm', label: styleCopy.formatCalm },
-];
+interface ResultMeta {
+  tone: StyleTone;
+  format: StyleFormat;
+}
 
 export function StyleForm({ examples }: { examples?: readonly StyleExample[] }) {
   const [text, setText] = useState('');
-  const [mode, setMode] = useState<Mode>('normal');
-  const [format, setFormat] = useState<Format>('auto');
+  const [tone, setTone] = useState<StyleTone>('normal');
+  const [format, setFormat] = useState<StyleFormat>('auto');
   const [signature, setSignature] = useState(false);
-  const [llm, setLlm] = useState<Llm>('cloud');
+  const [llm, setLlm] = useState<StyleLlm>('cloud');
   const [status, setStatus] = useState<Status>('idle');
   const [post, setPost] = useState<string | null>(null);
+  const [resultMeta, setResultMeta] = useState<ResultMeta | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [exampleNote, setExampleNote] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const resultRef = useRef<HTMLDivElement | null>(null);
+  const textRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Предпочтение движка из настроек (cookie model_pref) — best-effort, до выбора юзера.
   useModelPrefDefault(setLlm);
 
   // Размонтирование — снять висящий запрос.
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  const applyExample = useCallback((example: StyleExample) => {
+    setText(example.text);
+    setTone(example.tone);
+    setFormat(example.format);
+    setSignature(example.signature);
+    setExampleNote(
+      `История «${example.title}»: тон «${styleToneLabel(example.tone)}», формат «${styleFormatLabel(example.format)}». Можно править.`,
+    );
+    setStatus('idle');
+    setPost(null);
+    setResultMeta(null);
+    setError(null);
+    setCopied(false);
+    requestAnimationFrame(() => {
+      textRef.current?.focus();
+      textRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+  }, []);
 
   const submit = useCallback(async () => {
     const t = text.trim();
@@ -89,18 +106,20 @@ export function StyleForm({ examples }: { examples?: readonly StyleExample[] }) 
 
     setStatus('loading');
     setPost(null);
+    setResultMeta(null);
     setError(null);
     setCopied(false);
     try {
       const r = await fetch('/api/style/rewrite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: t, mode, format, signature, llm }),
+        body: JSON.stringify({ text: t, mode: tone, format, signature, llm }),
         signal: ac.signal,
       });
       const data = (await r.json().catch(() => null)) as RewriteResponse | null;
       if (data !== null && data.ok && typeof data.post === 'string') {
         setPost(data.post);
+        setResultMeta({ tone, format });
         setStatus('done');
         requestAnimationFrame(() => resultRef.current?.focus());
       } else {
@@ -128,7 +147,7 @@ export function StyleForm({ examples }: { examples?: readonly StyleExample[] }) 
       clearTimeout(timer);
       if (abortRef.current === ac) abortRef.current = null;
     }
-  }, [text, mode, format, signature, llm]);
+  }, [text, tone, format, signature, llm]);
 
   const copy = useCallback(async () => {
     if (post === null) return;
@@ -149,128 +168,66 @@ export function StyleForm({ examples }: { examples?: readonly StyleExample[] }) 
       <div className="lp-blob lp-blob-indigo -right-10 -top-10 h-40 w-40" aria-hidden="true" />
 
       <div className="relative">
-        <label
-          htmlFor="style-text"
-          className="block font-mono text-xs uppercase tracking-[0.18em] text-p-dim"
-        >
-          {styleCopy.textLabel}
-        </label>
+        <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
+          <label
+            htmlFor="style-text"
+            className="block font-mono text-xs uppercase tracking-[0.18em] text-p-dim"
+          >
+            {styleCopy.textLabel}
+          </label>
+          <span className="font-mono text-xs text-p-dim">
+            {text.length} / {MAX_TEXT}
+          </span>
+        </div>
         <textarea
           id="style-text"
+          ref={textRef}
           className={`mt-3 h-36 ${TEXTAREA}`}
           value={text}
           maxLength={MAX_TEXT}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            setExampleNote(null);
+          }}
           placeholder={styleCopy.textPlaceholder}
           disabled={loading}
         />
-        <div className="mt-2 text-right font-mono text-xs text-p-dim">
-          {text.length} / {MAX_TEXT}
-        </div>
 
-        {/* Чипы примеров: клик — подставить исходник (без автосообщения). */}
+        {/* Готовые истории: подставляют текст, тон и формат — продукт объясняется сам. */}
         {examples && examples.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label={styleCopy.examplesLabel}>
-            {examples.map((ex) => (
-              <button
-                key={ex.label}
-                type="button"
-                className={`lp-chip transition-colors duration-fast hover:border-brand-300 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS}`}
-                onClick={() => setText(ex.text)}
-                disabled={loading}
-              >
-                <span>{ex.label}</span>
-              </button>
-            ))}
-          </div>
+          <StyleExampleCards
+            examples={examples}
+            onApply={applyExample}
+            disabled={loading}
+            variant="light"
+            appliedLabel={exampleNote}
+          />
         )}
 
-        {/* Режим грубости: сегмент из трёх кнопок (radio-семантика). */}
-        <fieldset className="mt-5" disabled={loading}>
-          <legend className="block font-mono text-xs uppercase tracking-[0.18em] text-p-dim">
-            {styleCopy.modeLabel}
-          </legend>
-          <div className="mt-2 inline-flex rounded-full border border-p-line bg-paper-2 p-1" role="radiogroup" aria-label={styleCopy.modeLabel}>
-            {MODES.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                role="radio"
-                aria-checked={mode === m.id}
-                className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors duration-fast ${FOCUS} ${
-                  mode === m.id
-                    ? 'bg-brand-600 text-white shadow-lift'
-                    : 'text-p-dim hover:text-brand-600'
-                }`}
-                onClick={() => setMode(m.id)}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-        </fieldset>
-
-        {/* Движок: облако или локальная Ollama (обе настроены сервером). */}
-        <fieldset className="mt-5" disabled={loading}>
-          <legend className="block font-mono text-xs uppercase tracking-[0.18em] text-p-dim">
-            {styleCopy.llmLabel}
-          </legend>
-          <div className="mt-2 inline-flex rounded-full border border-p-line bg-paper-2 p-1" role="radiogroup" aria-label={styleCopy.llmLabel}>
-            {LLMS.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                role="radio"
-                aria-checked={llm === m.id}
-                className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors duration-fast ${FOCUS} ${
-                  llm === m.id
-                    ? 'bg-brand-600 text-white shadow-lift'
-                    : 'text-p-dim hover:text-brand-600'
-                }`}
-                onClick={() => setLlm(m.id)}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-        </fieldset>
-
-        {/* Формат + подпись: одна строка на десктопе. */}
-        <div className="mt-4 flex flex-wrap items-end gap-x-6 gap-y-3">
-          <div>
-            <label
-              htmlFor="style-format"
-              className="block font-mono text-xs uppercase tracking-[0.18em] text-p-dim"
-            >
-              {styleCopy.formatLabel}
-            </label>
-            <select
-              id="style-format"
-              className={`mt-2 rounded-xl border border-p-line bg-paper-2 px-3 py-2 text-sm text-p-ink ${FOCUS}`}
-              value={format}
-              onChange={(e) => setFormat(e.target.value as Format)}
-              disabled={loading}
-            >
-              {FORMATS.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-p-dim">
-            <input
-              type="checkbox"
-              className={`h-4 w-4 accent-brand-600 ${FOCUS.replace('ring-offset-paper', 'ring-offset-paper')}`}
-              checked={signature}
-              onChange={(e) => setSignature(e.target.checked)}
-              disabled={loading}
-            />
-            {styleCopy.signatureLabel}
-          </label>
+        <div className="mt-6">
+          <StyleTonePicker value={tone} onChange={setTone} disabled={loading} variant="light" />
         </div>
 
-        <div className="mt-5 flex flex-wrap items-center gap-4">
+        <div className="mt-6">
+          <StyleFormatPicker value={format} onChange={setFormat} disabled={loading} variant="light" />
+        </div>
+
+        <div className="mt-6 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+          <StyleSignatureToggle
+            checked={signature}
+            onChange={setSignature}
+            disabled={loading}
+            variant="light"
+          />
+          <StyleEnginePicker
+            value={llm}
+            onChange={setLlm}
+            disabled={loading}
+            variant="light"
+          />
+        </div>
+
+        <div className="mt-6 flex flex-wrap items-center gap-4">
           <button
             type="button"
             className={`inline-flex min-h-[52px] items-center justify-center gap-2 rounded-full bg-brand-600 px-7 text-base font-bold text-white shadow-lift transition-all duration-base ease-system hover:-translate-y-0.5 hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 ${FOCUS}`}
@@ -308,10 +265,17 @@ export function StyleForm({ examples }: { examples?: readonly StyleExample[] }) 
             </p>
           )}
 
-          {status === 'done' && post !== null && (
+          {status === 'done' && post !== null && resultMeta !== null && (
             <section aria-label={styleCopy.resultTitle} className="rounded-xl border border-p-line bg-paper-2 p-4 md:p-5">
-              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-                <h3 className="font-display text-lg font-semibold text-p-ink">{styleCopy.resultTitle}</h3>
+              <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                <div>
+                  <h3 className="font-display text-lg font-semibold text-p-ink">
+                    {styleCopy.resultTitle}
+                  </h3>
+                  <p className="mt-1 font-mono text-[11px] text-p-dim">
+                    {`${styleCopy.resultTone} «${styleToneLabel(resultMeta.tone)}» · ${styleCopy.resultFormat} «${styleFormatLabel(resultMeta.format)}»`}
+                  </p>
+                </div>
                 <button
                   type="button"
                   className={`lp-chip transition-colors duration-fast hover:border-brand-300 hover:text-brand-600 ${FOCUS}`}

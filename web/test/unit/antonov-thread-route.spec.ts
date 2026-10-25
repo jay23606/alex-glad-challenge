@@ -129,7 +129,7 @@ describe('POST /api/antonov/thread', () => {
     expect(messages[1]!.content).toContain('Автор оригинала: TheNearPost');
     expect(messages[1]!.content).toContain('Источник: https://example.com/src');
     expect(messages[1]!.content).toContain('1. схема центра поля');
-    expect(messages[1]!.content).toContain('ОБЫЧНЫЙ');
+    expect(messages[1]!.content).toContain('ПО-СВОЙСКИ');
     expect(messages[1]!.content).toContain('Длинный разбор про полузащиту.');
     expect(params.temperature).toBe(0.8);
     // Облаку можно 6000: выход потока длиннее одиночного поста.

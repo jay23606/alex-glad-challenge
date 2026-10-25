@@ -141,7 +141,7 @@ describe('POST /api/antonov/rewrite', () => {
     expect(messages).toHaveLength(2);
     expect(messages[0]!.role).toBe('system');
     expect(messages[0]!.content).toContain('РЕРАЙТЕР-СТИЛИЗАТОР');
-    expect(messages[1]!.content).toContain('ОБЫЧНЫЙ');
+    expect(messages[1]!.content).toContain('ПО-СВОЙСКИ');
     expect(messages[1]!.content).toContain('АВТО');
     expect(messages[1]!.content).toContain('парковка станет платной');
     expect(params.temperature).toBe(0.8);
@@ -168,7 +168,7 @@ describe('POST /api/antonov/rewrite', () => {
     await POST(req({ text: 'текст', mode: 'hard', format: 'guide', signature: true }));
     const [messages] = chat.mock.calls[0] as unknown as [Array<{ role: string; content: string }>];
     expect(messages[1]!.content).toContain('ЖЁСТКО');
-    expect(messages[1]!.content).toContain('ГАЙД');
+    expect(messages[1]!.content).toContain('ИНСТРУКЦИЯ');
     expect(messages[1]!.content).toContain('быть добру');
   });
 

@@ -7,11 +7,13 @@
 // Личный инструмент владельца (за auth-middleware), потребитель серверных
 // промптов lib/server/style-prompt.ts (STYLE_SYSTEM_PROMPT / THREAD_SYSTEM_PROMPT)
 // — без копий на клиенте. 'use client' по канону тул-страниц (/joker): textarea +
-// счётчик + чипы примеров + режим грубости + движок → 200 {ok,post|posts} |
-// 429/400/502/503. Клиентский таймаут: cloud 150с (провайдер режет генерацию на
-// 120-й), local 600с (потолок серверного вызова Ollama). История удачных генераций
-// режима «Пост» — localStorage (последние 10), читается в useEffect (не в рендере —
-// готча гидрации). Импорты — только data/* и components/ui (без lib/server, core).
+// счётчик + истории-пресеты (текст + тон + формат) + тон + формат + подпись +
+// движок → 200 {ok,post|posts} | 429/400/502/503. Контролы общие с публичным
+// /style (components/style/StyleControls) — формулировки не расходятся.
+// Клиентский таймаут: cloud 150с (провайдер режет генерацию на 120-й), local 600с
+// (потолок серверного вызова Ollama). История удачных генераций режима «Пост» —
+// localStorage (последние 10), читается в useEffect (не в рендере — готча
+// гидрации). Импорты — только data/* и components (без lib/server, core).
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -21,8 +23,25 @@ import { Card } from '../components/ui/Card';
 import { INPUT_CLASS } from '../components/ui/Field';
 import { SectionHead } from '../components/ui/SectionHead';
 import { SectionLabel } from '../components/ui/SectionLabel';
+import {
+  StyleEnginePicker,
+  StyleExampleCards,
+  StyleFormatPicker,
+  StyleSignatureToggle,
+  StyleTonePicker,
+} from '../components/style/StyleControls';
 import { useModelPrefDefault } from '../../lib/shared/use-model-pref';
-import { styleCopy, styleExamples, threadCopy, type StyleExample } from '../../data/style';
+import {
+  styleCopy,
+  styleExamples,
+  styleFormatLabel,
+  styleToneLabel,
+  threadCopy,
+  type StyleExample,
+  type StyleFormat,
+  type StyleLlm,
+  type StyleTone,
+} from '../../data/style';
 
 const MAX_TEXT = 15000; // контракт antonovRewriteSchema/antonovThreadSchema (zod на сервере вторым слоем)
 // Локальная Ollama на слабом CPU генерирует дольше облака — таймаут подвижный.
@@ -44,9 +63,9 @@ const MAX_IMAGES = 12;
 const TG_POST_LIMIT = 4096;
 
 type Kind = 'post' | 'thread';
-type Mode = 'soft' | 'normal' | 'hard';
-type Format = 'auto' | 'post' | 'essay' | 'guide' | 'calm';
-type Llm = 'cloud' | 'local';
+type Mode = StyleTone;
+type Format = StyleFormat;
+type Llm = StyleLlm;
 type Status = 'idle' | 'loading' | 'done' | 'error';
 
 interface RewriteResponse {
@@ -76,25 +95,6 @@ interface HistoryItem {
 const KINDS: ReadonlyArray<{ id: Kind; label: string }> = [
   { id: 'post', label: threadCopy.kindPost },
   { id: 'thread', label: threadCopy.kindThread },
-];
-
-const MODES: ReadonlyArray<{ id: Mode; label: string }> = [
-  { id: 'soft', label: styleCopy.modeSoft },
-  { id: 'normal', label: styleCopy.modeNormal },
-  { id: 'hard', label: styleCopy.modeHard },
-];
-
-const FORMATS: ReadonlyArray<{ id: Format; label: string }> = [
-  { id: 'auto', label: styleCopy.formatAuto },
-  { id: 'post', label: styleCopy.formatPost },
-  { id: 'essay', label: styleCopy.formatEssay },
-  { id: 'guide', label: styleCopy.formatGuide },
-  { id: 'calm', label: styleCopy.formatCalm },
-];
-
-const LLMS: ReadonlyArray<{ id: Llm; label: string }> = [
-  { id: 'cloud', label: styleCopy.llmCloud },
-  { id: 'local', label: styleCopy.llmLocal },
 ];
 
 const CHANNEL_URL = 'https://t.me/auantonov';
@@ -143,9 +143,11 @@ export default function AntonovPage() {
   const [copied, setCopied] = useState(false);
   const [copiedAll, setCopiedAll] = useState(false);
   const [copiedPost, setCopiedPost] = useState<number | null>(null);
+  const [exampleNote, setExampleNote] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const resultRef = useRef<HTMLDivElement | null>(null);
+  const textRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Предпочтение движка из настроек (cookie model_pref) — best-effort, до выбора юзера.
   useModelPrefDefault(setLlm);
@@ -174,6 +176,26 @@ export default function AntonovPage() {
       resetResult();
     },
     [kind, resetResult],
+  );
+
+  const applyExample = useCallback(
+    (example: StyleExample) => {
+      setKind('post');
+      setText(example.text);
+      setMode(example.tone);
+      setFormat(example.format);
+      setSignature(example.signature);
+      setExampleNote(
+        `История «${example.title}»: тон «${styleToneLabel(example.tone)}», формат «${styleFormatLabel(example.format)}». Можно править.`,
+      );
+      setStatus('idle');
+      resetResult();
+      requestAnimationFrame(() => {
+        textRef.current?.focus();
+        textRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      });
+    },
+    [resetResult],
   );
 
   const setErrorFromResponse = useCallback(
@@ -328,7 +350,7 @@ export default function AntonovPage() {
       <SectionHead
         code="канал"
         title="Антонов такой Антонов"
-        description="Черновик любого текста голосом канала — и агент потока: чужой разбор превращается в серию постов с рамкой переводчика. Промпты те же, что у публичного Антоновайзера."
+        description="Черновик любого текста голосом канала: тон, формат, подпись. Второй режим — поток-перевод чужого разбора с рамкой переводчика. Промпты те же, что у публичного Антоновайзера."
         actions={
           <a
             href={CHANNEL_URL}
@@ -370,10 +392,14 @@ export default function AntonovPage() {
         </label>
         <textarea
           id="antonov-text"
+          ref={textRef}
           className={`h-44 w-full resize-y ${INPUT_CLASS}`}
           value={text}
           maxLength={MAX_TEXT}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            setExampleNote(null);
+          }}
           placeholder={styleCopy.textPlaceholder}
           disabled={loading}
         />
@@ -441,103 +467,48 @@ export default function AntonovPage() {
           </>
         )}
 
-        {styleExamples.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label={styleCopy.examplesLabel}>
-            {styleExamples.map((ex: StyleExample) => (
-              <button
-                key={ex.label}
-                type="button"
-                className="rounded-md border border-line px-2.5 py-1 text-xs text-dim transition-colors duration-fast hover:border-accent-dim hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
-                onClick={() => setText(ex.text)}
-                disabled={loading}
-              >
-                {ex.label}
-              </button>
-            ))}
-          </div>
+        {kind === 'post' && styleExamples.length > 0 && (
+          <StyleExampleCards
+            examples={styleExamples}
+            onApply={applyExample}
+            disabled={loading}
+            variant="dark"
+            appliedLabel={exampleNote}
+          />
         )}
 
-        <fieldset className="mt-5" disabled={loading}>
-          <legend className="font-mono text-xs uppercase tracking-wider text-dim">
-            {styleCopy.modeLabel}
-          </legend>
-          <div className="mt-2 inline-flex rounded-md border border-line bg-surface p-1" role="radiogroup" aria-label={styleCopy.modeLabel}>
-            {MODES.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                role="radio"
-                aria-checked={mode === m.id}
-                className={`rounded px-3.5 py-1.5 text-sm font-medium transition-colors duration-fast ${
-                  mode === m.id ? 'bg-accent text-accent-ink' : 'text-dim hover:text-ink'
-                }`}
-                onClick={() => setMode(m.id)}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-        </fieldset>
-
-        {/* Движок: облако или локальная Ollama (обе настроены сервером). */}
-        <fieldset className="mt-5" disabled={loading}>
-          <legend className="font-mono text-xs uppercase tracking-wider text-dim">
-            {styleCopy.llmLabel}
-          </legend>
-          <div className="mt-2 inline-flex rounded-md border border-line bg-surface p-1" role="radiogroup" aria-label={styleCopy.llmLabel}>
-            {LLMS.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                role="radio"
-                aria-checked={llm === m.id}
-                className={`rounded px-3.5 py-1.5 text-sm font-medium transition-colors duration-fast ${
-                  llm === m.id ? 'bg-accent text-accent-ink' : 'text-dim hover:text-ink'
-                }`}
-                onClick={() => setLlm(m.id)}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-          {kind === 'thread' && <p className="mt-2 text-xs text-dim">{threadCopy.localHint}</p>}
-        </fieldset>
+        <div className="mt-5">
+          <StyleTonePicker value={mode} onChange={setMode} disabled={loading} variant="dark" />
+        </div>
 
         {kind === 'post' && (
-          <div className="mt-4 flex flex-wrap items-end gap-x-6 gap-y-3">
-            <div>
-              <label
-                htmlFor="antonov-format"
-                className="block font-mono text-xs uppercase tracking-wider text-dim"
-              >
-                {styleCopy.formatLabel}
-              </label>
-              <select
-                id="antonov-format"
-                className={`mt-2 ${INPUT_CLASS} w-auto`}
-                value={format}
-                onChange={(e) => setFormat(e.target.value as Format)}
-                disabled={loading}
-              >
-                {FORMATS.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-dim">
-              <input
-                type="checkbox"
-                className="h-4 w-4"
-                checked={signature}
-                onChange={(e) => setSignature(e.target.checked)}
-                disabled={loading}
-              />
-              {styleCopy.signatureLabel}
-            </label>
+          <div className="mt-5">
+            <StyleFormatPicker
+              value={format}
+              onChange={setFormat}
+              disabled={loading}
+              variant="dark"
+            />
           </div>
         )}
+
+        <div className={`mt-5 grid gap-3 ${kind === 'post' ? 'sm:grid-cols-2' : ''}`}>
+          {kind === 'post' && (
+            <StyleSignatureToggle
+              checked={signature}
+              onChange={setSignature}
+              disabled={loading}
+              variant="dark"
+            />
+          )}
+          <StyleEnginePicker
+            value={llm}
+            onChange={setLlm}
+            disabled={loading}
+            variant="dark"
+            hint={kind === 'thread' ? threadCopy.localHint : undefined}
+          />
+        </div>
 
         <div className="mt-5 flex flex-wrap items-center gap-4">
           <Button variant="primary" onClick={() => void submit()} disabled={disabled} loading={loading}>
@@ -631,7 +602,7 @@ export default function AntonovPage() {
                   </span>
                   <span className="mt-0.5 block font-mono text-[11px] text-dim">
                     {new Date(it.ts).toLocaleString('ru-RU')} · {it.text.length} зн. ·{' '}
-                    {MODES.find((m) => m.id === it.mode)?.label ?? it.mode}
+                    {styleToneLabel(it.mode)} · {styleFormatLabel(it.format)}
                   </span>
                 </button>
                 <Button size="sm" variant="ghost" onClick={() => void navigator.clipboard.writeText(it.post)}>
