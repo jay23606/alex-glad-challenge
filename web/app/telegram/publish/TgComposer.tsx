@@ -24,7 +24,7 @@ import {
   IconSend,
   IconWarning,
 } from '../../components/ui/icons';
-import { tgHtmlToPlain } from '../../../lib/shared/tg-html';
+import { tgHtmlToPlain, tgVisibleText } from '../../../lib/shared/tg-html';
 
 const MAX = 4096;
 const WARN_AT = 3800;
@@ -207,7 +207,7 @@ export function TgComposer({
     }
   };
 
-  const previewPlain = tgHtmlToPlain(text).split('\n');
+  const previewPlain = tgVisibleText(text).split('\n');
   const confirmPreview = previewPlain.slice(0, 6).join('\n');
 
   return (

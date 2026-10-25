@@ -180,6 +180,18 @@ describe('POST /api/telegram/publish', () => {
     expect(mocks.notifyAdd.mock.calls[0][0].body).toBe('a < b');
   });
 
+  it('notification body matches Telegram-visible text for HTML and none', async () => {
+    publishToTelegram.mockResolvedValue({ ok: true, messageId: 13 });
+    const session = `admin_session=${createSessionValue()}`;
+
+    await POST(req({ text: '5 < 10 > 3' }, session));
+    expect(mocks.notifyAdd.mock.calls[0][0].body).toBe('5 < 10 > 3');
+
+    mocks.notifyAdd.mockClear();
+    await POST(req({ text: '<b>5 < 10 > 3</b>', parseMode: 'none' }, session));
+    expect(mocks.notifyAdd.mock.calls[0][0].body).toBe('<b>5 < 10 > 3</b>');
+  });
+
   it('parseMode none пробрасывается', async () => {
     publishToTelegram.mockResolvedValue({ ok: true, messageId: 1 });
     await POST(req({ text: 'текст', parseMode: 'none' }, `admin_session=${createSessionValue()}`));

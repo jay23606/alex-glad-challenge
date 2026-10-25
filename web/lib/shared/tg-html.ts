@@ -84,3 +84,8 @@ export function tgHtmlToPlain(src: string): string {
     .replace(/&gt;/g, '>')
     .replace(/&amp;/g, '&');
 }
+
+// Text Telegram displays for a message with the given parse mode.
+export function tgVisibleText(src: string, parseMode: 'HTML' | 'none' = 'HTML'): string {
+  return parseMode === 'none' ? src : tgHtmlToPlain(sanitizeTgHtml(src));
+}
