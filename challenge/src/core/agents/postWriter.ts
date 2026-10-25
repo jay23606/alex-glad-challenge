@@ -140,7 +140,7 @@ ${topicBlock}${commentBlock}
   }
 }
 
-function cleanPost(raw: string, channel = 'Иди на факты глянь'): string {
+export function cleanPost(raw: string, channel = 'Иди на факты глянь'): string {
   let s = raw.trim();
   // Убираем markdown-обёртку.
   s = s.replace(/^```[\s\S]*?\n/, '').replace(/\n```$/, '');

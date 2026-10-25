@@ -39,6 +39,14 @@ export default function BlogSettingsPage() {
   const [contextPrompt, setContextPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [topic, setTopic] = useState('');
+  const [comment, setComment] = useState('');
+  const [variants, setVariants] = useState(1);
+  const [publishNow, setPublishNow] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [created, setCreated] = useState<
+    Array<{ id: number; variant: number; angle: string }>
+  >([]);
 
   useEffect(() => {
     fetch('/api/blogs')
@@ -107,6 +115,41 @@ export default function BlogSettingsPage() {
     }
   }, [config, saving, systemPrompt, contextPrompt, toast]);
 
+  const createPost = useCallback(async () => {
+    if (!config || creating) return;
+    setCreating(true);
+    setCreated([]);
+    try {
+      const resp = await fetch(`/api/blogs/${encodeURIComponent(config.slug)}/posts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic,
+          ...(comment.trim() ? { comment } : {}),
+          variants,
+          publishNow,
+        }),
+      });
+      const data = (await resp.json().catch(() => ({}))) as {
+        error?: string;
+        posts?: Array<{ id: number; variant: number; angle: string }>;
+        published?: { ok: boolean; error?: string } | null;
+      };
+      if (!resp.ok) throw new Error(data.error ?? `HTTP ${resp.status}`);
+      setCreated(data.posts ?? []);
+      setTopic('');
+      if (data.published && !data.published.ok) {
+        toast('err', `Пост создан, но публикация не удалась: ${data.published.error ?? 'ошибка'}`);
+      } else {
+        toast('ok', data.published?.ok ? 'Пост создан и опубликован' : 'Черновики созданы');
+      }
+    } catch (e) {
+      toast('err', e instanceof Error ? e.message : 'Не удалось создать пост');
+    } finally {
+      setCreating(false);
+    }
+  }, [config, creating, topic, comment, variants, publishNow, toast]);
+
   const dirty =
     config !== null &&
     (systemPrompt !== (config.systemPrompt ?? '') ||
@@ -136,6 +179,7 @@ export default function BlogSettingsPage() {
       />
 
       {config ? (
+        <>
         <Card label={`${config.name} · ${config.slug}`}>
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-dim">
             <span>профиль голоса: {config.profile ?? '—'}</span>
@@ -194,6 +238,97 @@ export default function BlogSettingsPage() {
             </div>
           </div>
         </Card>
+
+        <Card label="праздничный пост по теме">
+          <div className="space-y-4">
+            <Field
+              id="topic"
+              label="Тема"
+              hint="Разовый пост без RSS: праздник, объявление, важная дата. До 3 вариантов одной темы."
+            >
+              <input
+                className={`${INPUT_CLASS} w-full`}
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                maxLength={500}
+                placeholder="Рождественская служба 7 января"
+                disabled={creating}
+              />
+            </Field>
+
+            <Field
+              id="topic-comment"
+              label="Комментарий автора (необязательно)"
+              hint="Что обязательно упомянуть: время, место, детали, интонация."
+            >
+              <Textarea
+                value={comment}
+                onValueChange={setComment}
+                max={1000}
+                rows={4}
+                placeholder="Служба в 9:00, после — чай в трапезной…"
+                disabled={creating}
+              />
+            </Field>
+
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <label className="flex items-center gap-2 text-dim">
+                вариантов:
+                <select
+                  aria-label="Количество вариантов"
+                  className={INPUT_CLASS}
+                  value={variants}
+                  onChange={(e) => setVariants(Number(e.target.value))}
+                  disabled={creating}
+                >
+                  <option value={1}>1</option>
+                  <option value={2}>2</option>
+                  <option value={3}>3</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-2 text-dim">
+                <input
+                  type="checkbox"
+                  checked={publishNow}
+                  onChange={(e) => setPublishNow(e.target.checked)}
+                  className="accent-accent"
+                  disabled={creating}
+                />
+                сразу опубликовать первый вариант
+              </label>
+              <Button
+                variant="primary"
+                onClick={createPost}
+                disabled={creating || topic.trim().length < 3}
+              >
+                {creating ? 'Генерирую…' : 'Создать пост'}
+              </Button>
+            </div>
+            {publishNow && (
+              <p className="rounded-md border border-warn/40 bg-warn/10 p-2 text-xs text-warn">
+                Реальная отправка: первый вариант уйдёт в Telegram-канал блога
+                {config.tgChatId ? ` (${config.tgChatId})` : ' (общий канал)'}.
+              </p>
+            )}
+
+            {created.length > 0 && (
+              <div className="rounded-md border border-line bg-surface-2 p-3 text-sm">
+                <p className="text-dim">Созданные варианты:</p>
+                <ul className="mt-1 space-y-1">
+                  {created.map((p) => (
+                    <li key={p.id}>
+                      <a href={`/blog/posts/${p.id}`} className="text-accent hover:underline">
+                        #{p.id}
+                      </a>{' '}
+                      <span className="text-dim">· вариант {p.variant + 1} · {p.angle}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </Card>
+        </>
       ) : (
         <p className="text-sm text-dim">{loading ? 'Загрузка…' : 'Блог не выбран.'}</p>
       )}

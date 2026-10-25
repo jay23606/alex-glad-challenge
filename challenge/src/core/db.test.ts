@@ -105,6 +105,22 @@ test('db: system/context prompt — миграция легаси-базы и pe
   }
 });
 
+test('db: posts.topic/variant сохраняются (ручные посты и варианты)', () => {
+  const { dir, file } = tmpDb();
+  const db = new BlogDb(file);
+  try {
+    const blog = db.getBlogBySlug('nevsky-hram')!;
+    const id = db.insertPost('Праздничный пост', null, null, blog.id, 'Рождество', 2);
+    const post = db.getPost(id)!;
+    assert.equal(post.topic, 'Рождество');
+    assert.equal(post.variant, 2);
+    assert.equal(post.news_id, null);
+  } finally {
+    db.close();
+    safeRm(dir);
+  }
+});
+
 test('db: миграция легаси-базы — ALTER blogs + antonov блогу «Факты», идемпотентно', () => {
   const { dir, file } = tmpDb();
   // Легаси-схема: blogs без style_preset, с одним блогом «Факты».

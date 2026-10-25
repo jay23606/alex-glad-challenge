@@ -134,6 +134,9 @@ export { BlogAutomation, nextRunAfter } from '@challenge/core/automation';
 export type { AutomationRuleRow, AutomationRunRow, BlogRunOutcome, AutomationRunResult } from '@challenge/core/automation';
 // Общая фабрика прогона блога (pipeline + профиль + публикация по auto_publish).
 export { createAutomationRunner } from '@challenge/core/agents/automationRun';
+// Ручной/праздничный пост по теме (без RSS) + варианты подачи.
+export { TopicPostWriter, TOPIC_VARIANTS } from '@challenge/core/agents/topicWriter';
+export type { WrittenTopicPost, TopicVariantSpec } from '@challenge/core/agents/topicWriter';
 // Product: календарь + Google Calendar.
 export { buildIcs, deadlineEvent } from '@challenge/core/calendar';
 export type { CalendarEvent } from '@challenge/core/calendar';

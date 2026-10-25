@@ -325,6 +325,17 @@ export const blogPatchSchema = z.object({
 });
 export type BlogPatchInput = z.infer<typeof blogPatchSchema>;
 
+// POST /api/blogs/[slug]/posts — ручной/праздничный пост по теме (без RSS).
+// variants: 1..3 разных подачи; publishNow — реальная отправка первого варианта
+// в Telegram-канал блога (без него остаются черновики).
+export const blogTopicPostSchema = z.object({
+  topic: z.string().trim().min(3, 'Тема: минимум 3 символа').max(500, 'Тема: до 500 символов'),
+  comment: z.string().trim().max(1000, 'Комментарий: до 1000 символов').optional(),
+  variants: z.number().int().min(1).max(3).optional(),
+  publishNow: z.boolean().optional(),
+});
+export type BlogTopicPostInput = z.infer<typeof blogTopicPostSchema>;
+
 // --- Day 36: admin-auth ---
 
 // POST /api/auth/login — пароль единственного админа. Без .trim(): пробелы в

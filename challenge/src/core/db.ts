@@ -56,6 +56,8 @@ export interface PostRow {
   news_id: number | null;
   content: string;
   verdict: string | null;      // результат фактчекинга
+  topic: string | null;        // тема ручного/праздничного поста (news_id null)
+  variant: number;             // 0 = базовый; 1..N-1 — альтернативные подачи
   created_at: string;
   blog_id: number | null;
 }
@@ -98,6 +100,8 @@ CREATE TABLE IF NOT EXISTS posts (
   news_id INTEGER,
   content TEXT NOT NULL,
   verdict TEXT,
+  topic TEXT,
+  variant INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   blog_id INTEGER,
   FOREIGN KEY (news_id) REFERENCES news(id)
@@ -162,6 +166,13 @@ export class BlogDb {
             .run(backfillTo);
         }
       }
+    }
+    // Ручные/праздничные посты: тема и номер варианта (0 = базовый).
+    if (!this.hasColumn('posts', 'topic')) {
+      this.db.exec('ALTER TABLE posts ADD COLUMN topic TEXT');
+    }
+    if (!this.hasColumn('posts', 'variant')) {
+      this.db.exec('ALTER TABLE posts ADD COLUMN variant INTEGER NOT NULL DEFAULT 0');
     }
     // Индексы blog-колонок здесь, а не в SCHEMA: на легаси-базе колонка появляется
     // только в ALTER выше — CREATE INDEX по ней упал бы до этого.
@@ -298,11 +309,13 @@ export class BlogDb {
     newsId: number | null,
     verdict: string | null = null,
     blogId?: number | null,
+    topic: string | null = null,
+    variant = 0,
   ): number {
     const stmt = this.db.prepare(
-      'INSERT INTO posts (news_id, content, verdict, blog_id) VALUES (?, ?, ?, ?)',
+      'INSERT INTO posts (news_id, content, verdict, blog_id, topic, variant) VALUES (?, ?, ?, ?, ?, ?)',
     );
-    const result = stmt.run(newsId, content, verdict, blogId ?? null);
+    const result = stmt.run(newsId, content, verdict, blogId ?? null, topic, variant);
     return Number(result.lastInsertRowid);
   }
 
