@@ -1570,8 +1570,10 @@ support, settings, dark/light и 320dp/fs1.3. Скриншоты — `.shots/and
 integrations, server settings) намеренно не переносились на Android; E2E шёл
 против локального dev-сервера и локальной SQLite, production-сборка web
 проверена build'ом, production Android-подпись/Play Store не затрагивались;
-локальные E2E-данные (проект «Android E2E», задачи, выключенное правило
-автоматизации) остаются в `challenge/.data`.
+E2E-данные после прогона вычищены: проект «Android E2E» и задачи удалены,
+токен с эмулятора стёрт. Остались только выключенное правило автоматизации
+блога 1 (API не удаляет правила) и тестовое обращение поддержки в
+`challenge/.data`.
 
 **Код:** `android/**`, `web/lib/shared/tg-html.ts`,
 `web/app/api/telegram/publish/route.ts`, `web/app/telegram/publish/TgComposer.tsx`,
