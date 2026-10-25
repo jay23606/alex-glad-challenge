@@ -6,10 +6,12 @@ Native Android client for the «Артель» workspace web API. Kotlin + Jetpa
 
 - **Подключение** — server URL + bearer token, persisted in DataStore, validated against `GET /api/mobile/bootstrap`. The token never leaves the device (no hardcoding, no logging).
 - **Главная** — XP level ring, streak, achievements, workspace counts, notification badge.
+- **Геймификация** — XP/уровень с кольцом прогресса, серия и рекорд, достижения (открытые/закрытые) и журнал очков (`GET /api/gamification`); вход — тап по кольцу уровня или карточке достижения на главной.
 - **Проекты** — list, create (name/description/color), project detail with notes/tasks/links, done toggling, item creation.
+- **Задачи** — список задач (`GET /api/todos`) со статусами и повтором (ежедневно/по дню недели/каждые N ч/разово), complete/dismiss/delete с подтверждением, форма добавления (текст ≤500, интервал 1–168 ч для hourly); вход — тайл «Задачи» на главной.
 - **Автоматизация** — blog rules: enable/disable, interval + auto-publish configuration, run-now, recent runs.
-- **Календарь** — events grouped by day with source badges, Google sync action.
-- **Уведомления** — list with unread highlighting, mark-all-read.
+- **Календарь** — events grouped by day with Russian source badges; refresh (`GET /api/calendar`) отделён от Google sync (`POST /api/calendar/sync`, заблокирован без настроенного Google); экспорт `.ics` на 30 дней через share sheet (FileProvider, файл в cache).
+- **Уведомления** — list with unread highlighting, mark-all-read; тап по записи — `markRead(id)` и открытие http(s)-`href`; даты принимаются и в SQLite-формате `yyyy-MM-dd HH:mm:ss`, и в ISO.
 - **Ассистент** — chat UI over `POST /api/assistant` with a graceful error bubble on 503.
 - **Поддержка** — debounced FAQ search and ticket creation.
 - **Настройки** — connection info, theme selector (system/dark/light), logout.

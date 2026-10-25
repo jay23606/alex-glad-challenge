@@ -1,11 +1,14 @@
 package ru.memo7.artel.data.api
 
+import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.PATCH
 import retrofit2.http.POST
+import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.Streaming
 
 /** Endpoints of the web API shared in the project contract. */
 interface ArtelApi {
@@ -25,8 +28,8 @@ interface ArtelApi {
     @POST("api/workspace/items")
     suspend fun createItem(@Body body: CreateItemRequest): Response<CreatedIdResponse>
 
-    @PATCH("api/workspace/items")
-    suspend fun patchItem(@Body body: PatchItemRequest): Response<OkResponse>
+    @PATCH("api/workspace/items/{id}")
+    suspend fun patchItem(@Path("id") id: Long, @Body body: PatchItemRequest): Response<OkResponse>
 
     @GET("api/notifications")
     suspend fun notifications(): NotificationsResponse
@@ -43,8 +46,27 @@ interface ArtelApi {
     @POST("api/automation")
     suspend fun automationConfigure(@Body body: AutomationConfigureRequest): Response<OkResponse>
 
+    @PATCH("api/blogs/{slug}")
+    suspend fun setBlogStyle(@Path("slug") slug: String, @Body body: BlogStyleRequest): Response<OkResponse>
+
     @GET("api/calendar")
     suspend fun calendar(@Query("days") days: Int = 30): CalendarResponse
+
+    @Streaming
+    @GET("api/calendar/feed.ics")
+    suspend fun calendarIcs(@Query("days") days: Int = 30): Response<ResponseBody>
+
+    @GET("api/gamification")
+    suspend fun gamification(@Query("limit") limit: Int = 30): GamificationResponse
+
+    @GET("api/todos")
+    suspend fun todos(): TodosResponse
+
+    @POST("api/todos")
+    suspend fun addTodo(@Body body: TodoAddRequest): Response<CreatedIdResponse>
+
+    @POST("api/todos/{id}")
+    suspend fun todoAction(@Path("id") id: Long, @Body body: TodoActionRequest): Response<OkResponse>
 
     @POST("api/calendar/sync")
     suspend fun calendarSync(): Response<CalendarSyncResponse>

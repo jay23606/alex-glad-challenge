@@ -1,13 +1,14 @@
 // /api/blogs/[slug] — настройка блога. PATCH {name?, profile?, tgChatId?,
-// stylePreset?, sources?} → updateBlog. requireAuth — второй auth-слой (мутирует
-// конфиг блога). profile — имя существующего профиля голоса (/chat) или null
-// (сброс); sources — массив http(s)-URL, [] → null (дефолтные фиды);
+// stylePreset?, sources?} → updateBlog. requireApiAuth — второй auth-слой
+// (cookie-сессия ИЛИ мобильный Bearer-токен: патчит конфиг блога, в т.ч. с
+// мобильного клиента). profile — имя существующего профиля голоса (/chat) или
+// null (сброс); sources — массив http(s)-URL, [] → null (дефолтные фиды);
 // stylePreset — 'default' | 'antonov' (core stylePreset.ts). server-only.
 import 'server-only';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { blogPatchSchema } from '../../../../lib/shared/forms';
-import { requireAuth } from '../../../../lib/auth';
+import { requireApiAuth } from '../../../../lib/auth';
 import { ProfileManager, dataPath } from '../../../../lib/server/challenge';
 import { getBlogDb, withDb } from '../../../../lib/server/db';
 
@@ -18,7 +19,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ slug: string }> },
 ): Promise<Response> {
-  const denied = requireAuth(req);
+  const denied = requireApiAuth(req);
   if (denied) return denied;
 
   const { slug } = await params;

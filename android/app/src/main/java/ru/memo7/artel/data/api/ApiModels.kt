@@ -54,6 +54,14 @@ data class GamificationEventDto(
     @SerialName("createdAt") val createdAt: String,
 )
 
+/** GET /api/gamification?limit=N — статы, достижения и журнал XP-событий. */
+@Serializable
+data class GamificationResponse(
+    val stats: GamificationDto,
+    val achievements: List<AchievementDto> = emptyList(),
+    val events: List<GamificationEventDto> = emptyList(),
+)
+
 /* ---------- Projects ---------- */
 
 @Serializable
@@ -155,13 +163,50 @@ data class NotificationActionRequest(
     val id: Long? = null,
 )
 
+/* ---------- Todos ---------- */
+
+/** Задача /api/todos: поля snake_case — формат TodoRow из core todoDb. */
+@Serializable
+data class TodoDto(
+    val id: Long,
+    val text: String,
+    @SerialName("scheduled_at") val scheduledAt: String? = null,
+    val recurring: String? = null,
+    @SerialName("day_of_week") val dayOfWeek: Int? = null,
+    @SerialName("interval_hours") val intervalHours: Int? = null,
+    val status: String,
+    @SerialName("created_at") val createdAt: String,
+)
+
+@Serializable
+data class TodosResponse(
+    val todos: List<TodoDto> = emptyList(),
+)
+
+/** POST /api/todos: текст + повтор (daily/weekly/hourly) + интервал в часах для hourly. */
+@Serializable
+data class TodoAddRequest(
+    val text: String,
+    val recurring: String? = null,
+    val intervalHours: Int? = null,
+)
+
+/** POST /api/todos/{id}: complete | dismiss | delete. */
+@Serializable
+data class TodoActionRequest(
+    val action: String,
+)
+
 /* ---------- Automation ---------- */
 
 @Serializable
 data class AutomationRuleDto(
     val blogId: Long,
-    val blogSlug: String,
+    // Осиротевшее правило отдаёт slug=null — обязаны декодировать.
+    val blogSlug: String? = null,
     val blogName: String,
+    // 'default' | 'antonov' — синхронно с core stylePreset.ts.
+    val stylePreset: String = "default",
     val enabled: Boolean,
     val intervalMinutes: Int,
     val autoPublish: Boolean,
@@ -206,6 +251,12 @@ data class AutomationConfigureRequest(
     val enabled: Boolean,
     val intervalMinutes: Int,
     val autoPublish: Boolean,
+)
+
+/** PATCH /api/blogs/{slug}: смена стиля публикаций блога. */
+@Serializable
+data class BlogStyleRequest(
+    val stylePreset: String,
 )
 
 /* ---------- Calendar ---------- */

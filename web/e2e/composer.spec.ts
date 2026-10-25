@@ -44,18 +44,21 @@ test.describe('TG-компоузер (админ)', () => {
 
   test('confirm показывает канал и предупреждение; Esc отменяет — БЕЗ отправки', async ({ page }) => {
     const textarea = page.getByPlaceholder('Текст поста (HTML-разметка разрешена)…');
-    await textarea.fill('<b>e2e</b> confirm-проверка');
+    // Литеральные уголки рядом с разметкой: превью (tgVisibleText) обязано
+    // сохранить «5 < 10 > 3» как видимый текст, а не вырезать «< 10 >» как тег.
+    await textarea.fill('<b>e2e</b> confirm: 5 < 10 > 3');
     await page.getByRole('button', { name: /^Опубликовать$/ }).click();
 
     const dialog = page.getByRole('dialog');
     await expect(dialog).toContainText('Отправить в канал?');
     await expect(dialog).toContainText('Реальная отправка');
     await expect(dialog).toContainText('/ 4096');
+    await expect(dialog.locator('pre')).toContainText('5 < 10 > 3');
 
     // Esc = cancel (фокус возвращается, отправки нет)
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
-    await expect(textarea).toHaveValue('<b>e2e</b> confirm-проверка');
+    await expect(textarea).toHaveValue('<b>e2e</b> confirm: 5 < 10 > 3');
   });
 
   test('история публикаций рендерится (пустая или с записями)', async ({ page }) => {

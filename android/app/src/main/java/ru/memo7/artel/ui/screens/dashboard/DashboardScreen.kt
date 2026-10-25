@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Settings
@@ -105,6 +106,8 @@ fun DashboardScreen(
     onOpenSettings: () -> Unit,
     onOpenSupport: () -> Unit,
     onOpenProjects: () -> Unit,
+    onOpenGamification: () -> Unit,
+    onOpenTodos: () -> Unit,
 ) {
     val vm: DashboardViewModel = viewModel(
         factory = viewModelFactory { initializer { DashboardViewModel(container.repository) } }
@@ -155,6 +158,8 @@ fun DashboardScreen(
                 onOpenNotifications = onOpenNotifications,
                 onOpenSupport = onOpenSupport,
                 onOpenProjects = onOpenProjects,
+                onOpenGamification = onOpenGamification,
+                onOpenTodos = onOpenTodos,
             )
         }
     }
@@ -166,6 +171,8 @@ private fun DashboardContent(
     onOpenNotifications: () -> Unit,
     onOpenSupport: () -> Unit,
     onOpenProjects: () -> Unit,
+    onOpenGamification: () -> Unit,
+    onOpenTodos: () -> Unit,
 ) {
     val game = data.gamification
     Column(
@@ -188,6 +195,7 @@ private fun DashboardContent(
                     .weight(1.45f)
                     .fillMaxSize(),
                 tint = MaterialTheme.colorScheme.surface,
+                onClick = onOpenGamification,
             ) {
                 Box(Modifier.padding(16.dp)) {
                     LevelRing(
@@ -319,7 +327,7 @@ private fun DashboardContent(
                                 .clickable(
                                     interactionSource = interactionSource,
                                     indication = LocalIndication.current,
-                                    onClick = {},
+                                    onClick = onOpenGamification,
                                 )
                                 .padding(horizontal = 14.dp, vertical = 10.dp)
                                 .width(150.dp),
@@ -343,6 +351,39 @@ private fun DashboardContent(
                             )
                         }
                     }
+                }
+            }
+        }
+
+        // Todos quick action
+        BentoCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            onClick = onOpenTodos,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Rounded.Checklist,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Задачи", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Повторяющиеся напоминания и разовые задачи",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Button(onClick = onOpenTodos, shape = ArtelShapes.pill) {
+                    Text("Открыть", fontWeight = FontWeight.SemiBold)
                 }
             }
         }

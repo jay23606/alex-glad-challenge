@@ -76,6 +76,14 @@ export function sanitizeTgHtml(src: string): string {
   return out;
 }
 
+// Видимый текст уведомления/confirm-превью с учётом эффективного parse mode:
+// HTML → запрещённые/литеральные уголки проходят через sanitize (экранируются,
+//   не вырезаются вслепую) и разворачиваются обратно в текст;
+// none → строка и так чистый текст, разметка в ней литеральная по контракту.
+export function tgVisibleText(src: string, parseMode: 'HTML' | 'none' = 'HTML'): string {
+  return parseMode === 'none' ? src : tgHtmlToPlain(sanitizeTgHtml(src));
+}
+
 // Текст без разметки — для превью в confirm-диалогах и строк истории.
 export function tgHtmlToPlain(src: string): string {
   return src

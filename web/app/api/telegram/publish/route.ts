@@ -7,7 +7,7 @@ import { NextRequest } from 'next/server';
 import { createHash } from 'node:crypto';
 
 import { tgPublishSchema } from '../../../../lib/shared/forms';
-import { tgHtmlToPlain } from '../../../../lib/shared/tg-html';
+import { tgVisibleText } from '../../../../lib/shared/tg-html';
 import { requireAuth, SESSION_COOKIE } from '../../../../lib/auth';
 import { publishToTelegram, tgPublishResponse, tgRateLimit } from '../../../../lib/server/tg-publish';
 import { getGamificationDb, getNotificationDb, getWebhookDb, withDb } from '../../../../lib/server/db';
@@ -59,9 +59,10 @@ export async function POST(req: NextRequest): Promise<Response> {
       getNotificationDb().add({
         type: 'post_published',
         title: 'Пост опубликован',
-        // Тело уведомления — чистый текст: composer присылает TG-HTML, сырую
-        // разметку в /notifications не показываем (кап 160).
-        body: tgHtmlToPlain(parsed.data.text).slice(0, 160),
+        // Тело уведомления — видимый текст с учётом эффективного parse mode:
+        // composer присылает TG-HTML (литеральные уголки не вырезаются),
+        // при parseMode 'none' текст уже литеральный (кап 160).
+        body: tgVisibleText(parsed.data.text, parsed.data.parseMode ?? 'HTML').slice(0, 160),
         href: '/telegram/history',
       });
     });

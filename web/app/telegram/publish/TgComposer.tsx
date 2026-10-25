@@ -24,7 +24,7 @@ import {
   IconSend,
   IconWarning,
 } from '../../components/ui/icons';
-import { tgHtmlToPlain } from '../../../lib/shared/tg-html';
+import { tgVisibleText } from '../../../lib/shared/tg-html';
 
 const MAX = 4096;
 const WARN_AT = 3800;
@@ -207,7 +207,9 @@ export function TgComposer({
     }
   };
 
-  const previewPlain = tgHtmlToPlain(text).split('\n');
+  // Confirm-превью: composer всегда шлёт parseMode 'HTML' — литеральные
+  // уголки в черновике не вырезаются, а остаются видимым текстом.
+  const previewPlain = tgVisibleText(text).split('\n');
   const confirmPreview = previewPlain.slice(0, 6).join('\n');
 
   return (
@@ -379,7 +381,7 @@ export function TgComposer({
                     <span className="shrink-0 font-mono text-[11px] tabular-nums text-dim">{h.created_at}</span>
                     <Badge tone={SOURCE_TONE[h.source]}>{h.source}</Badge>
                     <span className="min-w-0 flex-1 truncate text-sm text-ink">
-                      {tgHtmlToPlain(h.text).replace(/\s+/g, ' ').trim() || '(пусто)'}
+                      {tgVisibleText(h.text).replace(/\s+/g, ' ').trim() || '(пусто)'}
                     </span>
                     <span className="shrink-0 font-mono text-[11px] tabular-nums text-dim">
                       {h.message_id !== null ? `msg ${h.message_id}` : '—'}

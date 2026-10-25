@@ -42,11 +42,13 @@ import ru.memo7.artel.ui.screens.assistant.AssistantScreen
 import ru.memo7.artel.ui.screens.automation.AutomationScreen
 import ru.memo7.artel.ui.screens.calendar.CalendarScreen
 import ru.memo7.artel.ui.screens.dashboard.DashboardScreen
+import ru.memo7.artel.ui.screens.gamification.GamificationScreen
 import ru.memo7.artel.ui.screens.notifications.NotificationsScreen
 import ru.memo7.artel.ui.screens.projects.ProjectDetailScreen
 import ru.memo7.artel.ui.screens.projects.ProjectsScreen
 import ru.memo7.artel.ui.screens.settings.SettingsScreen
 import ru.memo7.artel.ui.screens.support.SupportScreen
+import ru.memo7.artel.ui.screens.todos.TodosScreen
 
 object Routes {
     const val DASHBOARD = "dashboard"
@@ -57,6 +59,8 @@ object Routes {
     const val NOTIFICATIONS = "notifications"
     const val SUPPORT = "support"
     const val SETTINGS = "settings"
+    const val GAMIFICATION = "gamification"
+    const val TODOS = "todos"
     const val PROJECT_DETAIL = "project/{projectId}"
     fun projectDetail(id: Long) = "project/$id"
 }
@@ -138,6 +142,8 @@ fun ArtelRoot(container: AppContainer) {
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                     onOpenSupport = { navController.navigate(Routes.SUPPORT) },
                     onOpenProjects = { navController.navigate(Routes.PROJECTS) },
+                    onOpenGamification = { navController.navigate(Routes.GAMIFICATION) },
+                    onOpenTodos = { navController.navigate(Routes.TODOS) },
                 )
             }
             composable(Routes.PROJECTS) {
@@ -157,6 +163,12 @@ fun ArtelRoot(container: AppContainer) {
             }
             composable(Routes.SETTINGS) {
                 SettingsScreen(container, onBack = { navController.popBackStack() })
+            }
+            composable(Routes.GAMIFICATION) {
+                GamificationScreen(container, onBack = { navController.popBackStack() })
+            }
+            composable(Routes.TODOS) {
+                TodosScreen(container, onBack = { navController.popBackStack() })
             }
             composable(
                 route = Routes.PROJECT_DETAIL,

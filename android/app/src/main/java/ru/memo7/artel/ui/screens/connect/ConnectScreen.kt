@@ -56,6 +56,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 import ru.memo7.artel.core.network.ApiError
 import ru.memo7.artel.core.network.ApiFactory
 import ru.memo7.artel.core.network.ApiResult
@@ -111,6 +112,10 @@ class ConnectViewModel(private val store: CredentialsStore) : ViewModel() {
             }
             val result = try {
                 ApiResult.Success(api.bootstrap())
+            } catch (e: HttpException) {
+                // 401 — обещанное «Неверный токен доступа»; остальной HTTP — как раньше.
+                if (e.code() == 401) ApiResult.Failure(ApiError.Unauthorized())
+                else ApiResult.Failure(ApiError.Network(e))
             } catch (e: ApiError) {
                 ApiResult.Failure(e)
             } catch (e: java.io.IOException) {
