@@ -7,15 +7,21 @@
 // BlogAutomation зафиксировал failed run (паритет с web-адаптером).
 // Единственное место TG-бота, знающее про LLM/TG-публикацию (тесты — без сети).
 
+import type { BlogRow } from '../db.js';
 import { BlogDb } from '../db.js';
 import { LlmClient } from '../client.js';
 import { BlogAutomation } from '../automation.js';
-import { createAutomationRunner } from '../agents/automationRun.js';
+import { createAutomationRunner, loadBlogProfile } from '../agents/automationRun.js';
+import { publishPost } from '../agents/telegram.js';
+import { TopicPostWriter } from '../agents/topicWriter.js';
+import type { WriteTopicPost } from './botAutomation.js';
 import { dataPath } from '../paths.js';
 
 export interface TgAutomationRunner {
   readonly automation: BlogAutomation;
   readonly blogs: BlogDb;
+  /** /пост: тот же BlogDb/LlmClient, что и автоматизация (без второго клиента). */
+  readonly writeTopicPost: WriteTopicPost;
   close(): void;
 }
 
@@ -33,9 +39,37 @@ export function createTgAutomationRunner(): TgAutomationRunner {
     runBlog: (blogId) => runner.runBlog(blogId),
     blogExists: (id) => blogs.getBlog(id) !== null,
   });
+
+  let topicWriter: TopicPostWriter | null = null;
+  const writeTopicPost: WriteTopicPost = async (blog: BlogRow, req) => {
+    if (!topicWriter) topicWriter = new TopicPostWriter(client);
+    const profile = loadBlogProfile(undefined, blog);
+    const posts = await topicWriter.writeMany(blogs, blog, {
+      topic: req.topic,
+      comment: req.comment,
+      count: req.variants,
+      profile: profile ?? undefined,
+    });
+    const ids = posts.map((p) =>
+      blogs.insertPost(p.content, null, null, blog.id, req.topic, p.variant),
+    );
+    if (req.publish) {
+      const pub = await publishPost(posts[0].content, 'HTML', blog.tg_chat_id ?? undefined);
+      if (!pub.ok) throw new Error(`Публикация не удалась: ${pub.error ?? 'unknown'}`);
+    }
+    return {
+      ids,
+      published: req.publish,
+      message: req.publish
+        ? 'Пост создан и опубликован в TG'
+        : 'Пост создан (без публикации)',
+    };
+  };
+
   return {
     automation,
     blogs,
+    writeTopicPost,
     close(): void {
       automation.close();
       blogs.close();

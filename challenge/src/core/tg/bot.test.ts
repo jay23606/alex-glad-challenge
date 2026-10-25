@@ -666,6 +666,7 @@ test('dispatch #58: /уровень доступен не-owner, /блоги и 
     assert.match(h.sent[0]?.text ?? '', /Геймификация недоступна/);
     await h.bot.handleUpdate(messageUpdate(601, undefined, '/блоги'));
     await h.bot.handleUpdate(messageUpdate(602, undefined, '/авто idinafakty on'));
+    await h.bot.handleUpdate(messageUpdate(603, undefined, '/пост idinafakty Рождество'));
     assert.equal(h.sent.length, 1, 'owner-команды для не-owner — молчание');
   } finally {
     h.bot.cancelTimers();
