@@ -30,6 +30,46 @@ interface BlogConfig {
   sources: string[];
 }
 
+interface ScheduleEntry {
+  dayOfWeek: number;
+  timeLocal: string;
+  timezone: string;
+  topic: string;
+  variants: number;
+  enabled: boolean;
+}
+
+interface ScheduleRun {
+  id: number;
+  status: 'running' | 'success' | 'error';
+  attempts: number;
+  postId: number | null;
+  message: string;
+  startedAt: string;
+}
+
+interface ScheduleResponse {
+  schedules?: Array<{
+    dayOfWeek: number;
+    timeLocal: string;
+    timezone: string;
+    topic: string;
+    variants: number;
+    enabled: boolean;
+  }>;
+  runs?: ScheduleRun[];
+}
+
+const DAY_OPTIONS = [
+  { value: 1, label: 'Понедельник' },
+  { value: 2, label: 'Вторник' },
+  { value: 3, label: 'Среда' },
+  { value: 4, label: 'Четверг' },
+  { value: 5, label: 'Пятница' },
+  { value: 6, label: 'Суббота' },
+  { value: 0, label: 'Воскресенье' },
+];
+
 export default function BlogSettingsPage() {
   const { toast } = useToast();
   const [blogs, setBlogs] = useState<BlogOption[]>([]);
@@ -47,6 +87,10 @@ export default function BlogSettingsPage() {
   const [created, setCreated] = useState<
     Array<{ id: number; variant: number; angle: string }>
   >([]);
+  const [schedule, setSchedule] = useState<ScheduleEntry[]>([]);
+  const [scheduleRuns, setScheduleRuns] = useState<ScheduleRun[]>([]);
+  const [scheduleDirty, setScheduleDirty] = useState(false);
+  const [scheduleSaving, setScheduleSaving] = useState(false);
 
   useEffect(() => {
     fetch('/api/blogs')
@@ -73,6 +117,17 @@ export default function BlogSettingsPage() {
         setConfig(data.blog);
         setSystemPrompt(data.blog.systemPrompt ?? '');
         setContextPrompt(data.blog.contextPrompt ?? '');
+
+        // Расписание вспомогательное: его сбой не должен скрывать настройки
+        // промптов. null = секция покажет пустой список.
+        const scheduleData = await fetch(
+          `/api/blogs/${encodeURIComponent(target)}/schedule`,
+        )
+          .then((r) => (r.ok ? (r.json() as Promise<ScheduleResponse>) : null))
+          .catch(() => null);
+        setSchedule((scheduleData?.schedules ?? []).map((s) => ({ ...s })));
+        setScheduleRuns(scheduleData?.runs ?? []);
+        setScheduleDirty(false);
       } catch (e) {
         toast('err', e instanceof Error ? e.message : 'Не удалось загрузить блог');
         setConfig(null);
@@ -149,6 +204,61 @@ export default function BlogSettingsPage() {
       setCreating(false);
     }
   }, [config, creating, topic, comment, variants, publishNow, toast]);
+
+  const updateSlot = useCallback((index: number, patch: Partial<ScheduleEntry>) => {
+    setSchedule((prev) => prev.map((s, i) => (i === index ? { ...s, ...patch } : s)));
+    setScheduleDirty(true);
+  }, []);
+
+  const addSlot = useCallback(() => {
+    setSchedule((prev) => {
+      const used = new Set(prev.map((s) => s.dayOfWeek));
+      const day = [6, 0, 1, 2, 3, 4, 5].find((d) => !used.has(d)) ?? 6;
+      return [
+        ...prev,
+        {
+          dayOfWeek: day,
+          timeLocal: '10:00',
+          timezone: 'Europe/Moscow',
+          topic: '',
+          variants: 1,
+          enabled: true,
+        },
+      ];
+    });
+    setScheduleDirty(true);
+  }, []);
+
+  const removeSlot = useCallback((index: number) => {
+    setSchedule((prev) => prev.filter((_, i) => i !== index));
+    setScheduleDirty(true);
+  }, []);
+
+  const saveSchedule = useCallback(async () => {
+    if (!config || scheduleSaving) return;
+    setScheduleSaving(true);
+    try {
+      const resp = await fetch(
+        `/api/blogs/${encodeURIComponent(config.slug)}/schedule`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entries: schedule }),
+        },
+      );
+      const data = (await resp.json().catch(() => ({}))) as ScheduleResponse & {
+        error?: string;
+      };
+      if (!resp.ok) throw new Error(data.error ?? `HTTP ${resp.status}`);
+      setSchedule((data.schedules ?? []).map((s) => ({ ...s })));
+      setScheduleDirty(false);
+      toast('ok', 'Расписание сохранено');
+    } catch (e) {
+      toast('err', e instanceof Error ? e.message : 'Не удалось сохранить расписание');
+    } finally {
+      setScheduleSaving(false);
+    }
+  }, [config, schedule, scheduleSaving, toast]);
 
   const dirty =
     config !== null &&
@@ -321,6 +431,143 @@ export default function BlogSettingsPage() {
                         #{p.id}
                       </a>{' '}
                       <span className="text-dim">· вариант {p.variant + 1} · {p.angle}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </Card>
+
+        <Card label="расписание постов (дни недели)">
+          <div className="space-y-4">
+            <p className="text-xs text-dim">
+              Слоты запускаются в локальном времени таймзоны (окно догона 3 часа). По
+              умолчанию создаются черновики; автопубликация включается правилом блога
+              в <a href="/automation" className="text-accent hover:underline">/automation</a>.
+            </p>
+
+            {schedule.length === 0 ? (
+              <p className="rounded-md border border-line bg-surface-2 p-3 text-sm text-dim">
+                Слотов нет — добавьте день и время.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {schedule.map((s, i) => (
+                  <div key={i} className="rounded-md border border-line bg-surface-2 p-3">
+                    <div className="flex flex-wrap items-end gap-3 text-xs text-dim">
+                      <label className="flex flex-col gap-1">
+                        день
+                        <select
+                          className={INPUT_CLASS}
+                          value={s.dayOfWeek}
+                          onChange={(e) => updateSlot(i, { dayOfWeek: Number(e.target.value) })}
+                          disabled={scheduleSaving}
+                        >
+                          {DAY_OPTIONS.map((d) => (
+                            <option key={d.value} value={d.value}>
+                              {d.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        время
+                        <input
+                          type="time"
+                          className={INPUT_CLASS}
+                          value={s.timeLocal}
+                          onChange={(e) => updateSlot(i, { timeLocal: e.target.value })}
+                          disabled={scheduleSaving}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        таймзона
+                        <input
+                          className={`${INPUT_CLASS} w-40`}
+                          value={s.timezone}
+                          onChange={(e) => updateSlot(i, { timezone: e.target.value })}
+                          disabled={scheduleSaving}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        вариантов
+                        <select
+                          className={INPUT_CLASS}
+                          value={s.variants}
+                          onChange={(e) => updateSlot(i, { variants: Number(e.target.value) })}
+                          disabled={scheduleSaving}
+                        >
+                          <option value={1}>1</option>
+                          <option value={2}>2</option>
+                          <option value={3}>3</option>
+                        </select>
+                      </label>
+                      <label className="flex items-center gap-2 pb-2">
+                        <input
+                          type="checkbox"
+                          checked={s.enabled}
+                          onChange={(e) => updateSlot(i, { enabled: e.target.checked })}
+                          className="accent-accent"
+                          disabled={scheduleSaving}
+                        />
+                        включён
+                      </label>
+                      <button
+                        type="button"
+                        className="pb-2 text-xs text-err hover:underline disabled:opacity-50"
+                        onClick={() => removeSlot(i)}
+                        disabled={scheduleSaving}
+                      >
+                        удалить
+                      </button>
+                    </div>
+                    <label className="mt-2 flex flex-col gap-1 text-xs text-dim">
+                      тема / фокус (пусто = регулярный пост блога)
+                      <input
+                        className={`${INPUT_CLASS} w-full`}
+                        value={s.topic}
+                        maxLength={500}
+                        onChange={(e) => updateSlot(i, { topic: e.target.value })}
+                        placeholder="Субботняя заметка: жизнь прихода, люди и события"
+                        disabled={scheduleSaving}
+                      />
+                    </label>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="ghost" onClick={addSlot} disabled={scheduleSaving || schedule.length >= 14}>
+                Добавить слот
+              </Button>
+              <Button
+                variant="primary"
+                onClick={saveSchedule}
+                disabled={scheduleSaving || !scheduleDirty}
+              >
+                {scheduleSaving ? 'Сохраняю…' : 'Сохранить расписание'}
+              </Button>
+            </div>
+
+            {scheduleRuns.length > 0 && (
+              <div className="rounded-md border border-line p-3 text-xs">
+                <p className="mb-1 text-dim">Последние запуски</p>
+                <ul className="space-y-1">
+                  {scheduleRuns.slice(0, 5).map((r) => (
+                    <li key={r.id} className="flex flex-wrap gap-2">
+                      <span className={r.status === 'success' ? 'text-ok' : 'text-err'}>
+                        {r.status}
+                      </span>
+                      <span className="text-dim">{r.startedAt}</span>
+                      <span className="text-dim">попыток: {r.attempts}</span>
+                      <span>{r.message}</span>
+                      {r.postId !== null && (
+                        <a href={`/blog/posts/${r.postId}`} className="text-accent hover:underline">
+                          #{r.postId}
+                        </a>
+                      )}
                     </li>
                   ))}
                 </ul>

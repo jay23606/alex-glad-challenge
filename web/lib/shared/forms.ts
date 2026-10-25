@@ -336,6 +336,27 @@ export const blogTopicPostSchema = z.object({
 });
 export type BlogTopicPostInput = z.infer<typeof blogTopicPostSchema>;
 
+// PUT /api/blogs/[slug]/schedule — полная замена недельного расписания блога.
+// dayOfWeek: 0=Sunday .. 6=Saturday; timeLocal строго HH:MM; timezone — IANA
+// (core проверит Intl); variants 1..3; enabled=false оставляет слот в списке,
+// но не запускает его.
+export const blogScheduleEntrySchema = z.object({
+  dayOfWeek: z.number().int().min(0).max(6),
+  timeLocal: z
+    .string()
+    .trim()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Время: строго HH:MM'),
+  timezone: z.string().trim().min(1).max(64).optional(),
+  topic: z.string().trim().max(500, 'Тема: до 500 символов').optional(),
+  variants: z.number().int().min(1).max(3).optional(),
+  enabled: z.boolean().optional(),
+});
+export const blogScheduleSchema = z.object({
+  entries: z.array(blogScheduleEntrySchema).max(14, 'Расписание: не больше 14 слотов'),
+});
+export type BlogScheduleEntryInput = z.infer<typeof blogScheduleEntrySchema>;
+export type BlogScheduleUpdateInput = z.infer<typeof blogScheduleSchema>;
+
 // --- Day 36: admin-auth ---
 
 // POST /api/auth/login — пароль единственного админа. Без .trim(): пробелы в

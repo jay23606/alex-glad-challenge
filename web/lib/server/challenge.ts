@@ -137,6 +137,28 @@ export { createAutomationRunner } from '@challenge/core/agents/automationRun';
 // Ручной/праздничный пост по теме (без RSS) + варианты подачи.
 export { TopicPostWriter, TOPIC_VARIANTS } from '@challenge/core/agents/topicWriter';
 export type { WrittenTopicPost, TopicVariantSpec } from '@challenge/core/agents/topicWriter';
+// Недельное расписание (Сб/Вс): слоты в таймзоне + идемпотентный прогон.
+export {
+  BlogScheduleStore,
+  DEFAULT_TIMEZONE,
+  MAX_ATTEMPTS,
+  dueScheduleSlots,
+  isValidTimeZone,
+  localClock,
+} from '@challenge/core/blogSchedule';
+export type {
+  BlogScheduleInput,
+  BlogScheduleRow,
+  BlogScheduleRunRow,
+  ScheduleSlot,
+} from '@challenge/core/blogSchedule';
+export { createBlogScheduleRunner } from '@challenge/core/agents/blogScheduleRun';
+export type {
+  BlogScheduleRunner,
+  SchedulePublish,
+  ScheduleRunOutcome,
+  BlogScheduleRunnerOptions,
+} from '@challenge/core/agents/blogScheduleRun';
 // Product: календарь + Google Calendar.
 export { buildIcs, deadlineEvent } from '@challenge/core/calendar';
 export type { CalendarEvent } from '@challenge/core/calendar';
