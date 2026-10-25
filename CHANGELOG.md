@@ -1636,3 +1636,46 @@ typecheck` — чисто; Android `:app:testDebugUnitTest :app:assembleDebug` �
 `android/app/src/test/java/ru/memo7/artel/data/NormalizeBaseUrlTest.kt`,
 `android/app/src/test/java/ru/memo7/artel/data/api/AuthApiContractTest.kt`,
 `android/README.md`.
+
+## Android: runbook диагностики недоступности сервера (2026-10-26)
+**Дата:** 2026-10-26. Профиль «Поиск бага» (loop-run).
+
+**Контекст:** инцидент входа Артель: корректный пароль, на экране входа
+«Сервер недоступен: failed to connect to /100.66.133.56 (port 3000)
+from /192.168.31.134 (port 41378) after 15000ms». Диагноз: отказ
+TCP-подключения до HTTP-фазы — проблема connectivity, не аутентификации.
+
+**Причины (стек):**
+- В момент ошибки телефон шёл мимо VPN: источник сокета в ошибке —
+  `192.168.31.134` (Wi-Fi/LAN), а не tailnet-адрес `100.68.6.26`; серверная
+  Tailscale-панель показывала телефон `offline, last seen 2h ago`. Пакеты к
+  `100.66.133.56` (CGNAT 100.64/10) уходили в домашний шлюз и терялись →
+  `SocketTimeoutException` на 15s `connectTimeout` (`ApiFactory`).
+- Штатные web-скрипты bind'ят сервер только на `127.0.0.1` (`-H` в
+  `web/package.json`), т.е. при штатном запуске сервер не виден по tailnet;
+  приёмка Android-фичи 2026-10-25 использовала ручной запуск
+  `next dev -H <tailscale-ip>`, который ни один скрипт репо не воспроизводит.
+- На момент диагностики на `:3000` не слушал никто (сервер не запущен).
+
+**Сделано:** `android/README.md` — чеклист «Сервер недоступен: failed to
+connect … after 15000ms»: сервер запущен → bind на доступный телефону адрес
+(Tailscale-IP или `tailscale serve`) → VPN на телефоне (адрес источника из
+`from /<ip>` в ошибке) → firewall → cleartext в release. Код не менялся;
+`dev`/`start` с `-H 127.0.0.1` сохранены по правилу loopback-bind.
+
+**Проверки:** сервер поднят `pnpm --filter web exec next dev -H
+100.66.133.56`; `Test-NetConnection 100.66.133.56 -Port 3000` — True
+(до фикса False); `GET /` → 200; `POST /api/mobile/login` с `{}` → 400
+`{"ok":false,"error":"Required"}`. С телефона не проверялось: телефон
+offline в tailnet на момент диагностики — осталось включить Tailscale на
+телефоне. Firewall-правило для порта 3000 автоматически не добавлено
+(нужны права администратора): node.exe уже разрешён inbound (Private/
+Public), интерфейс Tailscale = Private.
+
+**Риски:** dev-режим на tailnet-IP — персональная деплой-модель Артель
+(HTTP внутри tailnet + парольный вход); без VPN с телефона сервер
+недоступен по определению. IP сервера не коммитится: в docs только
+плейсхолдер. Для release/GPS-вне-tailnet — HTTPS за reverse-proxy
+(`tailscale serve` как минимальный вариант).
+
+**Код:** `android/README.md`, `CHANGELOG.md` (docs-only).
