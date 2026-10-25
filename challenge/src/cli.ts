@@ -131,7 +131,7 @@ function printHelp(): void {
   console.log('  rag index-tg <chat> [<topicId>]  TG-топик → length-чанки (склейка сообщ.) → RAG strategy=telegram');
   console.log('    --top <N>           tier1: top-N чанков по реакциям (по умолч. 1500), чистит telegram');
   console.log('    --rest              tier2: доклеить хвост (остальные чанки), НЕ чистит индекс');
-  console.log('    --reset             полный reindex: чистит telegram и индексирует все чанки');
+  console.log('    --reset             полный reindex: пересобирает чанки RAG-индекса');
   console.log('    --limit <N>         ограничить collect (только smoke; на chunk-build не влияет)');
   console.log('  rag index-tg <chat>              ВЕСЬ чат: forum=все топики (GetForumTopics),');
   console.log('                                       не-forum=основной поток (topic_id=0). Только с --reset');
@@ -139,7 +139,8 @@ function printHelp(): void {
   console.log('    --probe             dry-run: проверить чтение топика (5 сообщ.), без записи');
   console.log('    --limit <N>         ограничить число сообщений (для --probe / smoke)');
   console.log('    --resume            продолжить прерванный сбор с курсора');
-  console.log('    --reset             очистить топик и собрать заново (полный re-fetch)');
+  console.log('    --reset             полный re-fetch: сброс курсора, сборка с нуля чата;');
+  console.log('                        уже скачанные сообщения НЕ удаляются (upsert-дедуп)');
   console.log('  tg-top <chat> [<topicId>]  Топ сообщений по реакциям/дате (SQL над tg.sqlite, без сети)');
   console.log('    --by likes|date     сортировка (по умолч. likes)');
   console.log('    --limit <N>         сколько строк (по умолч. 20)');
