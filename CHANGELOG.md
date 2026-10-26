@@ -1860,3 +1860,43 @@ memory/branch/profile/constraints — они остаются в backlog эпи�
 `android/.../ui/screens/dashboard/DashboardScreen.kt`,
 `android/app/src/test/java/ru/memo7/artel/data/api/ChatStreamTest.kt`,
 `android/app/src/test/java/ru/memo7/artel/data/api/ChatContractTest.kt`.
+
+---
+
+## Feature: курс — недели 8–9 Advanced-потока (полная транскрипция + выдержки) (2026-10-26)
+**Дата:** 2026-10-26. Профиль: `business-feature`, loop-run, milestone `run-2026-10-26`.
+
+**Задание:** добавить в базу знаний курса транскрипции «8 неделя 1 поток
+адвансд» и «9 неделя 1 поток адвансд» — так же, как предыдущие уроки:
+полная транскрипция с таймкодами + курирование (summary/why/pain/выдержки),
+чтобы уроки были видны и понятны в web (`/course`) и Android («Артель»).
+
+**Сделано:**
+- Конвертация md-транскриптов в формат импортера
+  `*.transcript.json` (utterances `MM:SS → ms`, end = start следующего,
+  длительность 24:59 и 28:31) — источники в `challenge/.data/course-sources/`
+  (вне git), 74 и 28 абзацев.
+- Курирование: `challenge/src/data/course/week-8.json` (код-ассистент:
+  main-агент, субагенты, скиллы/команды/хуки, правила open–close, профили,
+  инварианты, Task State, Execution Loop, MCP-набор) и `week-9.json`
+  (файн-тюнинг: attention/LoRA/QLoRA, датасеты, оверфиттинг, границы
+  применимости), по 10 выдержек каждая.
+- Импорт CLI `course-import` — в course.sqlite добавлены week-8 (10 секций)
+  и week-9 (26 секций); upsert идемпотентный, web/Android изменений кода
+  не требуют (список строится из CourseDb, упорядочен по week_no).
+
+**Проверки:** challenge typecheck зелёный + 280/280 тестов; web typecheck +
+Vitest 541/541 (включая course-роуты); `pnpm --filter web build` — ок;
+smoke через `CourseDb.getLesson/getSections/getExcerpts` — оба урока
+рассекционированы (0–1 499 000 мс и 0–1 711 000 мс), выдержки на месте;
+повторный импорт безопасен (упsert). Экраны курса закрыты middleware
+(админ-cookie/Bearer) — как и раньше.
+
+**Риски/ограничения:** недели 8–9 — Advanced-поток; слаги `week-8`/`week-9`
+использованы напрямую и могут пересечься с будущей нумерацией основного
+потока (тогда переименовать слаги отдельной задачей). Android-сборка не
+прогонялась в этой сессии — нет JDK в среде; Kotlin-код не менялся.
+
+**Код:** `challenge/src/data/course/{week-8,week-9}.json`
+(данные, кода нет); драйверы импорта — уже существующие
+`challenge/src/{core/courseDb.ts,core/courseImport.ts,cli.ts}`.
