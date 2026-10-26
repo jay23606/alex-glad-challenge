@@ -320,6 +320,49 @@ data class CreateTicketRequest(
     val contact: String? = null,
 )
 
+/* ---------- Course (лекции курса I2N Challenge) ---------- */
+
+@Serializable
+data class CourseLessonDto(
+    val slug: String,
+    val title: String,
+    val kind: String,
+    @SerialName("weekNo") val weekNo: Int? = null,
+    @SerialName("durationMs") val durationMs: Long = 0,
+    val summary: String = "",
+    val why: String = "",
+    val pain: String = "",
+)
+
+@Serializable
+data class CourseLessonsResponse(
+    val ok: Boolean,
+    val lessons: List<CourseLessonDto> = emptyList(),
+)
+
+@Serializable
+data class CourseSectionDto(
+    val idx: Int,
+    @SerialName("startMs") val startMs: Long,
+    @SerialName("endMs") val endMs: Long,
+    val text: String,
+)
+
+@Serializable
+data class CourseExcerptDto(
+    val idx: Int,
+    val quote: String,
+    val explanation: String,
+)
+
+@Serializable
+data class CourseLessonResponse(
+    val ok: Boolean,
+    val lesson: CourseLessonDto,
+    val sections: List<CourseSectionDto> = emptyList(),
+    val excerpts: List<CourseExcerptDto> = emptyList(),
+)
+
 /* ---------- Raw error body ---------- */
 
 @Serializable

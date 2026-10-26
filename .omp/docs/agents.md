@@ -1,5 +1,10 @@
 # Agent Personas
 
+> **Harness-neutral reference.** Slash-command and plugin examples (`/ship`,
+> `/review`, `.claude-plugin/plugin.json`) are illustrative and apply only if your
+> harness provides them. This pack ships no commands or plugin. Personas are in
+> `../agents/`; skills are in `../skills/`.
+
 Specialist personas that play a single role with a single perspective. Each persona is a Markdown file consumed as a system prompt by your harness (Claude Code, Cursor, Copilot, etc.).
 
 | Persona | Role | Best for |
@@ -116,8 +121,8 @@ Plugin agents do not support `hooks`, `mcpServers`, or `permissionMode` frontmat
 
 ## Adding a new persona
 
-1. Create `agents/<role>.md` with the same frontmatter format used by existing personas.
+1. Create `../agents/<role>.md` with the same frontmatter format used by existing personas.
 2. Define the role, scope, output format, and rules.
 3. Add a **Composition** block at the bottom (Invoke directly when / Invoke via / Do not invoke from another persona).
 4. Add the persona to the table at the top of this file.
-5. If the persona enables a new orchestration pattern, document it in `references/orchestration-patterns.md` rather than inventing the pattern in the persona file itself.
+5. If the persona enables a new orchestration pattern, document it in `../references/orchestration-patterns.md` rather than inventing the pattern in the persona file itself.

@@ -1,0 +1,83 @@
+{
+  "name": "agent-pack",
+  "version": "1.0.0",
+  "description": "Portable Agent Skills, work profiles, personas, references, and project-adapter templates.",
+  "layout": {
+    "rules": ".omp/RULES.md",
+    "skills": ".omp/skills",
+    "agents": ".omp/agents",
+    "references": ".omp/references",
+    "docs": ".omp/docs",
+    "profiles": ".omp/skills/agent-profiles",
+    "bootstrap": ".omp/skills/project-bootstrap",
+    "templates": ".omp/skills/project-bootstrap/assets/templates"
+  },
+  "profiles": {
+    "skill": "agent-profiles",
+    "bootstrap": "project-bootstrap",
+    "supported": [
+      "business-feature",
+      "bug-search",
+      "research",
+      "project-graph"
+    ]
+  },
+  "skillMetadata": {
+    "versioned": [
+      "agent-profiles",
+      "project-bootstrap"
+    ],
+    "note": "Workflow skills use the Agent Skills-required name/description only."
+  },
+  "harness": {
+    "opencode": {
+      "entry": "AGENTS.md",
+      "config": "opencode.json",
+      "rules": ".omp/RULES.md",
+      "skills": ".omp/skills"
+    },
+    "claude": {
+      "entry": "CLAUDE.md",
+      "fallback": "AGENTS.md",
+      "skills": ".claude/skills",
+      "optional": true
+    },
+    "codex": {
+      "entry": "AGENTS.md",
+      "skills": ".agents/skills",
+      "optional": true
+    },
+    "gemini": {
+      "entry": "GEMINI.md",
+      "fallback": "AGENTS.md",
+      "skills": ".agents/skills",
+      "optional": true
+    },
+    "cursor": {
+      "entry": ".cursor/rules/000-canonical.mdc",
+      "template": ".omp/skills/project-bootstrap/assets/templates/cursor-rules.mdc",
+      "optional": true
+    },
+    "copilot": {
+      "entry": ".github/copilot-instructions.md",
+      "template": ".omp/skills/project-bootstrap/assets/templates/copilot-instructions.md",
+      "optional": true
+    },
+    "omp": {
+      "entry": "AGENTS.md",
+      "rules": ".omp/RULES.md",
+      "skills": ".omp/skills"
+    }
+  },
+  "precedence": [
+    "project AGENTS.md",
+    ".omp/RULES.md",
+    "harness global config",
+    "harness defaults"
+  ],
+  "compatibility": {
+    "opencode": "1.19 tested; 2.x documented",
+    "agent-skills": "SKILL.md name/description contract",
+    "node": "20+ for validation snippets"
+  }
+}

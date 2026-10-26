@@ -1679,3 +1679,87 @@ Public), интерфейс Tailscale = Private.
 (`tailscale serve` как минимальный вариант).
 
 **Код:** `android/README.md`, `CHANGELOG.md` (docs-only).
+
+## Блоги: шпаргалка по управлению на сайте и в Android (2026-10-26)
+**Дата:** 2026-10-26. Профиль «Бизнес-фича». Запрос пользователя: короткая
+памятка на самой странице управления, читаемая с телефона на сайте и в
+приложении, вместо отдельного MD-файла.
+
+**Что сделано:**
+- Страница `/blog/settings` переименована в «Управление блогами» и получила
+  карточку «шпаргалка · как пользоваться»: 5 шагов (выбор блога, промпты,
+  разовый пост, расписание, проверка результата), предупреждение о безопасном
+  режиме черновиков и раскрываемый блок с Telegram-командой
+  `/пост <блог> [publish] <тема> [| комментарий]` и частыми вопросами.
+- `/blog/settings` добавлена в группу «блог» боковой/мобильной навигации —
+  раньше страница была доступна только из empty-state «Постов».
+- Android: в `AutomationScreen` первым элементом списка добавлена свёрнутая
+  карточка «Шпаргалка» с теми же 5 шагами под возможности приложения и кнопкой
+  «Открыть веб-настройки» (сохранённый base URL + `/blog/settings`); при пустом
+  списке правил карточка остаётся видимой.
+- Удалённого управления в Android нет намеренно: промпты и расписание живут на
+  сайте, приложение только ведёт к ним и объясняет публикацию/запуск.
+
+**Проверки:** `pnpm --filter web typecheck` — чисто; focused
+`blog-cheatsheet.spec.tsx` — 2/2; полный web Vitest — 536/536 (69 файлов);
+`pnpm --filter web build` — 49 страниц, `/blog/settings` в маршрутах;
+Playwright-smoke на viewport 390×844 (вход, страница, раскрытие FAQ, команда) —
+1 passed; Android `BlogHelpTest` (4 теста: шаги, команда, URL, пустой base URL)
+и полный `:app:testDebugUnitTest` — 50/50, `compileDebugKotlin` без новых
+предупреждений; challenge typecheck + 268/268 (без изменений в core).
+
+**Риски/ограничения:** шпаргалка — статический текст; при смене TG-синтаксиса
+или шагов её нужно править синхронно в `BlogCheatSheet.tsx` и
+`AutomationScreen.kt`. Android-ссылка открывает браузер и требует доступного
+с телефона сервера (та же tailnet-модель, что у входа). Полный web-прогон,
+запущенный параллельно с Gradle/build, один раз упал на таймаутах воркеров;
+последовательный прогон с `--maxWorkers=2` — 536/536.
+
+**Код:** `web/app/blog/settings/{page.tsx,BlogCheatSheet.tsx}`,
+`web/data/nav.ts`, `web/test/ui/blog-cheatsheet.spec.tsx`,
+`web/e2e/blog.spec.ts`,
+`android/app/src/main/java/ru/memo7/artel/ui/screens/automation/AutomationScreen.kt`,
+`android/app/src/test/java/ru/memo7/artel/ui/screens/automation/BlogHelpTest.kt`.
+
+---
+
+## Feature: курс I2N #8 — импорт транскрипций в web и Android (2026-10-26)
+**Дата:** 2026-10-26. Профиль: `business-feature`.
+
+**Задание:** импортировать 6 видео I2N Challenge #8 (вступление + недели 1–5)
+в проект, чтобы смотреть уроки в web (`/course`) и Android («Артель»), в двух
+уровнях контента: очищенная транскрипция с таймкодами и курированные выдержки
+с пояснениями (что/зачем/какую боль закрывает).
+
+**Сделано:**
+- Core: `CourseDb` (таблицы `lessons`/`sections`/`excerpts`, транзакционный
+  `upsertLesson`) и `courseImport` (slug из имени файла, парсинг
+  `*.transcript.json`, группировка utterance'ов в секции ~180с с оверлапом и
+  склейкой коротких хвостов, метаданные из `challenge/src/data/course/<slug>.json`).
+- CLI: `course-import <dir> [--meta <dir>]`; база `challenge/.data/course.sqlite`
+  засеяна 6 уроками с выдержками.
+- Web: server-компоненты `/course` и `/course/[slug]` (через `getCourseDb` +
+  `withDb`), навигационная группа `course`, GET-роуты
+  `/api/course/lessons[/{slug}]` под админ-gate (cookie/Bearer).
+- Android: DTO + `@GET api/course/lessons[/{slug}]`, кэш списка в
+  `ArtelRepository`, экраны `CourseScreen` (карточки уроков) и
+  `CourseDetailScreen` (зачем/боль + выдержки + транскрипция с таймкодами),
+  роуты `course`/`course/{slug}`, тайл «Курс» на дашборде.
+
+**Проверки:** challenge typecheck + 280/280 (12 — course-тесты); web typecheck +
+Vitest 541/541 (включая `course-lessons-route.spec.ts` 5/5); `pnpm --filter web
+build` — `/course` и `/api/course` в маршрутах; Android `compileDebugKotlin` и
+`assembleDebug` — без ошибок (JDK 21 из `artel-tools`).
+
+**Риски/ограничения:** страницы курса и API закрыты middleware (админ-cookie или
+Bearer-токен) — анонимный просмотр недоступен; выдержки — статические JSON в
+репозитории, при новом видео их нужно добавить вручную; Android не кэширует
+деталь урока офлайн (список — в памяти, детали — всегда по сети).
+
+**Код:** `challenge/src/core/courseDb.ts`, `challenge/src/core/courseImport.ts`,
+`challenge/src/data/course/*.json`, `challenge/src/cli.ts`,
+`web/app/course/`, `web/app/api/course/`, `web/data/nav.ts`,
+`web/lib/server/{db,challenge}.ts`,
+`android/.../ui/screens/course/`, `android/.../data/api/{ApiModels,ArtelApi}.kt`,
+`android/.../data/ArtelRepository.kt`, `android/.../ui/ArtelRoot.kt`,
+`android/.../ui/screens/dashboard/DashboardScreen.kt`.

@@ -19,6 +19,7 @@ import {
   SupportCenterDb,
   WebhookDb,
   InboundHookDb,
+  CourseDb,
   dataPath,
 } from './challenge';
 
@@ -33,6 +34,7 @@ let notifications: NotificationDb | null = null;
 let support: SupportCenterDb | null = null;
 let webhooks: WebhookDb | null = null;
 let inboundHooks: InboundHookDb | null = null;
+let course: CourseDb | null = null;
 
 export function getBlogDb(): BlogDb {
   if (!blog) blog = new BlogDb(dataPath('blog.sqlite'));
@@ -89,6 +91,11 @@ export function getWebhookDb(): WebhookDb {
 export function getInboundHookDb(): InboundHookDb {
   if (!inboundHooks) inboundHooks = new InboundHookDb(dataPath('webhooks.sqlite'));
   return inboundHooks;
+}
+
+export function getCourseDb(): CourseDb {
+  if (!course) course = new CourseDb(dataPath('course.sqlite'));
+  return course;
 }
 
 // Serial-обёртка: fn выполняется строго после предыдущего withDb-вызова. Ошибки одного

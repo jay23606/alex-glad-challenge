@@ -1,4 +1,3 @@
-<!-- From: E:/IT/alex-glad-challenge/AGENTS.md -->
 # AGENTS.md — правила проекта (v3, Agent Skills)
 
 Единый контракт для ИИ-ассистентов, работающих с репозиторием
@@ -6,25 +5,75 @@
 реальность репозитория**, а не историю первых десяти дней.
 
 Этот проект использует workflow-пак [Agent Skills](https://github.com/addyosmani/agent-skills)
-(24 lifecycle-скилла + 4 review-персоны). Проектные факты (стек, структура,
-границы, конвенции, команды валидации) остаются в этом файле; сами процессы
-живут в `.omp/skills/` и `.omp/agents/`.
+(26 скиллов: 24 workflow + `agent-profiles` + `project-bootstrap`; 4 review-персоны).
+Проектные факты (стек, структура, границы, конвенции, команды валидации) остаются
+в этом файле; сами процессы живут в `.omp/skills/` и `.omp/agents/`.
 
 ## 0. Как читать правила
 
-- **Глобальный конфиг:** `~/.omp/agent/AGENTS.md` — общие правила для всех
-  проектов. Он **не отменяет** этот файл; при конфликте побеждает проектный.
+- **Глобальные конфиги harness'ов:** `~/.omp/agent/AGENTS.md` (omp),
+  `~/.config/opencode/AGENTS.md` (OpenCode), `~/.claude/CLAUDE.md` (Claude Code)
+  — общие fallback-правила. Они **не отменяют** этот файл; при конфликте
+  побеждает проектный.
 - **Локальный конфиг:** этот `AGENTS.md` — канонический источник правил проекта.
+- **Язык:** русский, если пользователь пишет по-русски; код и идентификаторы —
+  английские.
 - **Sticky-правила:** `.omp/RULES.md` — короткие жёсткие инварианты, которые
   должны оставаться в контексте даже в длинной сессии.
-- **Скиллы:** `.omp/skills/*/SKILL.md` — 24 workflow-скилла из Agent Skills.
+- **Скиллы:** `.omp/skills/*/SKILL.md` — 24 workflow-скилла + `agent-profiles`
+  (профили) + `project-bootstrap` (перенос pack'а).
+- **Pack:** `.omp/pack.json` (v1.0.0) и `.omp/README.md` — переносимый слой;
+  проектная адаптация живёт только в этом `AGENTS.md`.
 - **Персоны агентов:** `.omp/agents/*.md` — `code-reviewer`, `test-engineer`,
   `security-auditor`, `web-performance-auditor`.
 - **Референсы:** `.omp/references/*.md` — чек-листы: Definition of Done,
   testing-patterns, security, performance, accessibility, observability,
   orchestration-patterns.
-- `CLAUDE.md` — исторический документ для другого инструмента. При расхождении
-  с этим файлом прав `AGENTS.md`; не дублируйте правила в `CLAUDE.md`.
+- **Harness-адаптеры:** `CLAUDE.md`, `GEMINI.md`, `opencode.json`, `.claude/*`,
+  `.cursor/*`, `.github/copilot-instructions.md` и аналоги — только указатели на
+  этот файл и `.omp/*`; собственных правил не содержат. При расхождении прав
+  `AGENTS.md`; не дублируйте правила в адаптерах.
+
+### 0.1. Harness entrypoint (STRICT)
+
+Единый источник истины для любого harness — этот файл и каталоги `.omp/`:
+
+1. `AGENTS.md` — правила проекта (этот файл).
+2. `.omp/RULES.md` — sticky-инварианты; читаются до первого tool call.
+3. `.omp/skills/<name>/SKILL.md` — workflow-скиллы; загружаются по имени, только
+   по релевантности задачи, не все сразу.
+4. `.omp/agents/*.md` — персоны ревью; `.omp/references/*.md` — чек-листы.
+
+Любой harness (omp, OpenCode, Claude Code, Gemini CLI, Codex, Cursor, Copilot,
+Aider и т. п.) ОБЯЗАН:
+
+- прочитать `AGENTS.md` и `.omp/RULES.md` до первого действия;
+- на старте задачи загрузить `agent-profiles`; проектные привязки — §13;
+- искать скиллы в `.omp/skills/`, а не в приватной копии; при совпадении имени
+  проектный скилл побеждает глобальный;
+- использовать `.omp/agents/*.md` и `.omp/references/*.md` по ссылке, не
+  дублируя их содержимое.
+
+`opencode.json` только подключает пути (`instructions` → `.omp/RULES.md`,
+`skills` → `.omp/skills`); правил он не содержит. OpenCode резолвит `skills` от
+стартового каталога, а не от файла конфига: полный набор — только при запуске из
+корня. Из `challenge/`, `web/` и более глубоких каталогов читайте
+`.omp/skills/<name>/SKILL.md` явно; глобальные копии в `~/.agents/skills` —
+fallback и могут быть устаревшими.
+
+Персоны: канон — `.omp/agents/*.md`. OpenCode регистрирует глобальные копии
+`~/.config/opencode/agent/*.md`; после правки канона синхронизируйте копии (или
+читайте канон явно), иначе harness увидит старую версию.
+
+Запрет questionnaires — prompt-level: `permission.question` оставлен по
+умолчанию, чтобы исключения §13.1.1 (секрет/доступ, необратимое действие,
+`P0`/`incident`) оставались возможны.
+
+Любой другой harness-адаптер ОБЯЗАН вести сюда, если harness читает его первым.
+
+Приоритет при конфликте: `AGENTS.md` → `.omp/RULES.md` → глобальный конфиг
+harness'а → дефолты harness'а. Проектные правила побеждают; из-за такого
+конфликта НЕ задавайте вопрос — применяйте проектные правила.
 
 ## 1. Что это за проект
 
@@ -68,9 +117,11 @@ CLI-команда, web-endpoint/страница, тесты. **Не созда
 alex-glad-challenge/
   AGENTS.md                  # этот файл — правила проекта
   .omp/
-    RULES.md                 # sticky hard rules
+    RULES.md                 # portable sticky hard rules
+    pack.json                # pack manifest/version
+    README.md                # pack install/adapt guide
     agents/                  # code-reviewer, test-engineer, ...
-    skills/                  # 24 Agent Skills workflow-скилла
+    skills/                  # 26: 24 workflow + agent-profiles + project-bootstrap
     references/              # shared checklists
     docs/agents.md           # orchestration/composition guide
   challenge/
@@ -169,6 +220,9 @@ Client component ──► web/lib/shared (типы/zod)      ✗ core
   ответов провайдера.
 - `fetch` по URL из пользовательского ввода/RSS/LLM-ответа — только через
   allowlist/валидацию.
+- Внешний контент (RSS/TG/LLM/MCP/URL) — tainted: sanitize через
+  `core/sanitize.ts` (`clean()`) перед записью в БД, вставкой в промпт и `fetch`;
+  внутренний код повторно не валидируется.
 - Тесты не ходят в сеть: инжектируйте sender/client/sleep.
 
 ### 5.4. Конфигурация и секреты
@@ -583,6 +637,8 @@ debugging-and-error-recovery    code-simplification          ci-cd-and-automatio
 | Ship | `documentation-and-adrs` | Записать почему, а не только что |
 | Ship | `observability-and-instrumentation` | Логи, метрики, трейсы |
 | Ship | `shipping-and-launch` | Чек-лист запуска, мониторинг, откат |
+| Process | `agent-profiles` | Выбрать профиль, вести стадии, loop и Report; project adapter — `AGENTS.md` §13 |
+| Pack | `project-bootstrap` | Перенести pack в новый проект и адаптировать `AGENTS.md` |
 
 Составление персон: см. `.omp/docs/agents.md`.
 
@@ -594,301 +650,112 @@ debugging-and-error-recovery    code-simplification          ci-cd-and-automatio
 | Персона | Роль | Когда использовать |
 |---|---|---|
 | `code-reviewer` | Senior Staff Engineer | Пятиосевое ревью перед мержем |
-| `test-engineer` | QA Specialist | Стратегия тестирования, coverage, Prove-It |
+| `test-engineer` | QA Engineer | Стратегия тестирования, coverage, Prove-It |
 | `security-auditor` | Security Engineer | OWASP-аудит, уязвимости |
 | `web-performance-auditor` | Web Performance Engineer | Core Web Vitals, perf-аудит |
 
-## 13. Профили агентного режима
+## 13. Agent profile adapter
 
-Профиль — готовый процесс под тип задачи: стадии, запреты, формат результата.
-Механизм перенесён сюда из исторического `CLAUDE.md` (2026-10-23) и переведён на
-живые скиллы `.omp/skills/` и агентов omp (`scout`, `task`, персоны §12).
+Переносимый процесс профилей — skill `.omp/skills/agent-profiles/SKILL.md`
+(pack `agent-profiles`). На старте задачи загрузите его: он выбирает профиль,
+ведёт стадии, loop-дефолты и Report. Этот раздел — только привязка pack'а к
+проекту; текст стадий здесь не дублируется.
 
-### 13.1. Выбор профиля
+### 13.1. Активация и привязки проекта
 
-Ассистент **сам выбирает** профиль по ключевым словам запроса (таблица ниже),
-объявляет его одной строкой (`профиль: Бизнес-фича`) и далее следует **СТРОГО**
-по графу стадий этого профиля до конца задачи — без повторных вопросов. Смена
-профиля — только явным решением при вскрывшейся ошибке выбора. `ask` — только
-когда задача реально неоднозначна И выбор профиля меняет результат; в остальных
-случаях действовать по консервативному выбору, не спрашивать и не угадывать.
+- Выбор профиля — `agent-profiles/references/selection.md`; ассистент объявляет
+  профиль одной строкой и не спрашивает, какой выбрать.
+- Роли: `researcher` → `scout` ×3; `implementer` → `task`; `reviewer` →
+  `code-reviewer` (+ `security-auditor` для security-риска); `validator` →
+  `test-engineer`; `orchestrator` → main-сессия.
+- `reportDir`: `swarm-report/`.
+- Валидация: команды §10; baseline — `pnpm --filter challenge typecheck`;
+  focused-тест/прогон — по изменённому поведению.
+- Поверхности: `challenge/` (CLI/core/TG/MCP), `web/` (Next.js), `android/`
+  (Kotlin/Compose), `docs/`. Заморожено: `challenge/src/demos/day-01..30`,
+  `docs/advanced-day-01..05` (исторические материалы, не правила), исторические
+  архивы.
+- Tracker и issue flow — §13.9.
+- Граф: опциональный `graphify`; `graphify-out/graph.json`; обновление
+  инкрементальное.
+- Локализованные метки профилей: «Бизнес-фича», «Поиск бага», «Research»,
+  «Граф проекта».
 
-Пропуск стадии профиля (особенно `Validation` и `Report`) — дефект процесса:
-он фиксируется в отчёте, а не молча «закрывается» ad-hoc проверками (§13.2).
+Заметки по профилям (детали стадий — в skill):
+- **Бизнес-фича:** только существующие поверхности; `day-NN` заморожены;
+  переиспользовать core-модули.
+- **Поиск бага:** минимальный детерминированный repro CLI/тест/браузер;
+  Prove-It до фикса.
+- **Research:** `find`/`grep`/`glob`, LSP references, `graphify query` при
+  готовом графе.
+- **Граф проекта:** поверхности → server/adapters → core → data; недоказанные
+  рёбра — `INFERRED`.
 
-| Триггеры в запросе | Профиль |
+### 13.1.1. Loop values (project adapter)
+
+Семантика дефолтов, commit/push, приоритетов, ask-исключений и метрик —
+`agent-profiles/references/loop.md`. Здесь только проектные значения; вопросы о
+них не задаются.
+
+| Слот | Проектное значение |
 |---|---|
-| «добавить», «реализовать», «фича», «интеграция», «endpoint», «команда CLI» | **Бизнес-фича** |
-| «баг», «ошибка», «падает», «не работает», «регрессия», «стек-трейс», «воспроизвести» | **Поиск бага** |
-| «как устроено», «найди», «какие», «где», «оцени» (вопрос без правок) | **Research** |
-| «граф», «карта проекта», «связи компонентов», «схема фич» | **Граф проекта** |
+| Ветка | текущая `feat/*`; иначе `feat/<slug>` от `main` |
+| Milestone | `run-YYYY-MM-DD`, при коллизии `-2`, `-3`… |
 
-### 13.2. Общие правила стадийных профилей (STRICT)
+Tracker/labels — §13.9; reportDir/roles/surfaces — §13.1; commit/push и
+приоритеты — по loop.md, без проектных исключений.
 
-- Оркестратор не пишет код сам: чтение/поиск → `scout`, правки → `task`, ревью →
-  персоны §12. Одна стадия = один тип работы; субагент не меняет стадию сам.
-  Перед сменой — строка `стадия X → Y` пользователю и в prompt следующего агента.
-- Контекст между агентами — два канала, оба обязательны: (1) сводка «Контекст от
-  предыдущей стадии» в prompt; (2) файлы `swarm-report/`. Субагенты не общаются
-  напрямую.
-- Нейминг артефактов: `swarm-report/<slug>-<stage>-<NN>.md` (stage: `research`,
-  `plan`, `diagnose`, `fix`, `validation`), `<slug>-reproduce.md`,
-  `<slug>-e2e-scenario.md`, финал `<slug>-<YYYY-MM-DD>.md`. При fan-out —
-  `<slug>-<stage>-<роль|пакет>-<NN>.md`; параллельная запись в один файл запрещена.
-- Fan-out внутри стадии — одним сообщением. Консилиум — ровно 3. Fix — ≤4 агентов
-  и только при непересекающихся файлах; точку интеграции трогает один агент;
-  во время параллельной фазы никто не коммитит. Барьеры — только по данным:
-  Plan после всех research-отчётов, Validation после Fix, Report после Validation.
-- Baseline до правок: `pnpm --filter challenge typecheck` + прогон целевой
-  команды/тестов — точка сравнения для Validation.
-- Цикл Fix↔Validation без прогресса >2 итераций → стоп и доклад. Репродукция —
-  ≤3 попыток, между попытками меняется один параметр.
-- Право возражать: субагент, нашедший костыль/дыру/техдолг, фиксирует возражение
-  в своём отчёте; оркестратор доводит его до пользователя, не глотает.
-- Устойчивость к компактизации: статус работы — в файлах `swarm-report/`, не в
-  памяти; перед шагом перечитать файл сценария; шаги с `[x]` не повторять.
-- Report обязателен в конце (§13.7). Без Report сценарий незавершён.
+### 13.2. Стадии, Report, расширение
 
-### 13.3. Бизнес-фича
+Всё перенесено в pack:
+- `agent-profiles/references/stages.md` — общий stage law, fan-out и лимиты;
+- `agent-profiles/references/{feature,bug-search,research,project-graph}.md` —
+  профили;
+- `agent-profiles/references/report.md` — Report;
+- `agent-profiles/references/extending.md` — как добавить профиль.
 
-Новая функциональность на существующих поверхностях (`web/`, CLI, MCP-серверы,
-TG). Новые `day-NN` не создаются (§1).
+Проект добавляет только: baseline/focused-команды §10, security-пункты §10 в
+Report, `reportDir` из §13.1 и tracker-поля §13.9. Текст стадий и шаблон Report
+здесь не дублируются.
 
-Скиллы: `spec-driven-development` → `planning-and-task-breakdown` →
-`incremental-implementation` / `test-driven-development` →
-`code-review-and-quality`. Персоны: `code-reviewer`, `test-engineer`.
+Номера §13.3–§13.8 удалены: профили, стадии, Report и расширение живут в
+`.omp/skills/agent-profiles/`.
 
-Граф стадий: `Research → Plan → Fix → Validation → Report`; единственный откат —
-`Validation → Fix`. Запрещены: `Research → Fix`, `Research → Validation`,
-`Plan → Validation`, `Fix → Plan`, `Fix → Research`, `Report → *`.
+### 13.9. Issue and incident adapter
 
-| Стадия | Агент | Делает |
-|---|---|---|
-| Research | `scout` ×3 (архитектор / стек / продуктовый критик) | факты, точки интеграции, готовые утилиты для переиспользования, критерии приёмки |
-| Plan | `task` | затрагиваемые файлы, work-пакеты (непересекающиеся → fan-out), подход, риски |
-| Fix | `task` (≤4) | реализация по плану, typecheck |
-| Validation | `code-reviewer` + `test-engineer` | typecheck до/после, соответствие плану, регрессии, security |
-| Report | оркестратор | §13.7 |
+Generic priority/WIP/iteration/metrics law — `agent-profiles/references/loop.md`.
+Project values:
 
-ДОЛЖЕН: переиспользовать существующие модули; держать diff хирургическим;
-проверять по §10.
-НЕ ДОЛЖЕН: создавать второй chokepoint/пакет/зависимость без явного одобрения;
-трогать замороженные `demos/` и архивы; коммитить без запроса.
-Report-specific: затронутые файлы, критерии приёмки → статус, риски/допущения.
-
-### 13.4. Поиск бага
-
-Дефект, регрессия, неверное поведение runtime.
-
-Скиллы: `debugging-and-error-recovery` (reproduce → localize → reduce → fix →
-guard), `test-driven-development` (Prove-It: сперва падающий тест), для web —
-`browser-testing-with-devtools`. Персона: `code-reviewer`.
-
-Граф стадий: `Diagnose → Reproduce → Fix → Validation → Report`; откаты
-`Reproduce → Diagnose` (гипотеза опровергнута) и `Validation → Fix`. Запрещены:
-`Diagnose → Fix`, `Fix → Diagnose`, `Reproduce → Validation`, `Report → *`.
-Сумма откатов ≤2, далее стоп и доклад.
-
-Diagnose — консилиум 3 (`scout`): гипотез-генератор / трассировщик кода /
-контр-цензор; каждый пишет свой файл. Reproduce стартует только по подтверждённой
-гипотезе.
-
-ДОЛЖЕН: воспроизводить детерминированно минимальным прогоном ДО правок; править
-корневую причину, а не симптом; добавлять регрессионный тест (Prove-It); гнать
-typecheck и целевые тесты после фикса.
-НЕ ДОЛЖЕН: начинать Fix без подтверждённого repro; чинить симптом; делать 4-ю
-попытку репродукции; править попутный код.
-Report-specific: корневая причина, шаги repro, фикс (файл:строка), подтверждение
-«больше не воспроизводится», регрессии.
-
-### 13.5. Research
-
-Вопрос по кодовой базе → структурированный ответ. Изменений кода — ноль.
-
-Агент: `scout` (read-only). Скиллы: `source-driven-development`; для вопросов о
-структуре — сначала `graphify query` при готовом `graphify-out/graph.json`.
-
-ДОЛЖЕН: локализовать файлы (`find`/`grep`/`glob`), читать код, а не память;
-проверять связи (кто импортирует/вызывает; для символов — LSP references);
-сопоставлять поверхности с тестами (что покрыто/нет); каждое утверждение —
-`file:line`; честно отделять проверенное от предположений.
-НЕ ДОЛЖЕН: менять файлы, коммитить, ставить пакеты; запускать мутирующие команды
-(миграции, генерация, build с записью); ходить в сеть; утверждать без источника.
-
-Формат ответа: (1) краткий ответ 2–3 предложения; (2) файлы — `path:line` + роль;
-(3) связи — кто на кого и в какую сторону; (4) выводы; (5) открытые вопросы и что
-не проверено.
-
-### 13.6. Граф проекта
-
-Карта проекта / цепи компонентов / фич: узлы, рёбра, структурные выводы.
-
-Агент: `scout` собирает факты (модули, импорты, поверхности); граф собирает
-оркестратор. Тяжёлый пайплайн — глобальный скилл `graphify` (`/graphify .`,
-инкремент `--update`, ответы `graphify query`).
-
-ДОЛЖЕН: строить рёбра по реальным импортам/вызовам; уровни: поверхности
-(CLI/TG/MCP) → web-server (роуты/адаптеры) → core-модули → данные; помечать
-недоказанные рёбра как
-INFERRED; в выводы — god-модули, циклы, нарушения границ; обновлять граф
-инкрементально (`graphify --update`), не перестраивать с нуля.
-НЕ ДОЛЖЕН: менять код; включать замороженное (`demos/`, архивы) в активный граф
-без пометки; выдумывать узлы/рёбра.
-
-Формат: mermaid-граф → легенда узлов (path + роль) → 3–5 структурных выводов →
-ограничения (что не включено).
-
-### 13.7. Шаблон Report
-
-```markdown
-# <Slug> — <YYYY-MM-DD>
-
-## Профиль
-<Бизнес-фича | Поиск бага | Research | Граф проекта>
-
-## Что сделано / Ответ
-- …
-
-## Проверки
-- [ ] typecheck: `pnpm --filter challenge typecheck` (+ `web` при затронутом web/)
-- [ ] Прогон: <команда/тест/сценарий>
-
-### Security-чеклист (стадийные профили)
-- [ ] Ключи только в `.env`; SQL parameterized; tainted-контент sanitize
-- [ ] `.env`/`.data/` не в коммите; fetch по tainted-URL — через allowlist
-- [ ] web: bind loopback; client-bundle без секретов
-
-## Риски / допущения
-## Открытые вопросы
-```
-
-### 13.8. Как добавить новый профиль
-
-Чек-лист (каждый пункт обязателен, профиль без любого из них неполон):
-
-1. **Триггер** — добавить строку в таблицу §13.1 (ключевые слова → имя профиля).
-2. **Subsection §13.N** с обязательными блоками:
-   - Назначение — один абзац: какой тип задачи, что на выходе.
-   - Агенты и скиллы — `scout`/`task`/персоны §12 + скиллы `.omp/skills/`.
-   - ДОЛЖЕН — проверяемые действия (искать/читать/запускать/проверять).
-   - НЕ ДОЛЖЕН — запреты (что профильу запрещено в принципе).
-   - Формат ответа — нумерованная структура результата (для стадийных — граф
-     переходов + таблица стадий + отчётные поля).
-3. **Шаблон Report** — дополнить enum в §13.7, если профилю нужны свои поля.
-4. **Боевой прогон** — одна реальная задача; артефакты в `docs/advanced-day-*`;
-   при доработках после первой попытки — зафиксировать в CHANGELOG.
-
-Существующие профили соответствуют этому чек-листу (проверено при добавлении
-Research и Графа проекта, 2026-10-23).
-
-### 13.9. Находки, дефекты и инциденты вне скоупа
-
-Правило уровня процесса, а не отдельный профиль: действует в любом профиле и
-для любого исполнителя (omp, Claude Code, Codex, человек). Источник истины —
-этот раздел и `.github/ISSUE_TEMPLATE/bug.md`; `.omp/RULES.md` дублирует только
-инварианты. Приоритет без метки на issue не существует. Ни один шаг ниже не
-требует omp-инструментов: нужны только `gh` и GitHub.
-
-**Приоритеты:**
-
-|Метка|Когда|Что делает исполнитель|
-|---|---|---|
-|`P0` + `incident`|прод недоступен, потеря/утечка данных, security|останавливает текущую задачу, чинит инцидент (`hotfix`), issue заводит сразу|
-|`P1`|сломан основной сценарий, обход есть|доводит текущую задачу до §10, затем берёт issue следующим слотом|
-|`P2`|побочный дефект, UX, неверный край|заводит issue сразу, кладёт в пул, задачу не прерывает|
-|`P3`|косметика, техдолг, «заодно»|issue в пул, берётся в свободное окно|
-
-**Порядок при находке:**
-
-1. Оформить issue по `.github/ISSUE_TEMPLATE/bug.md`
-   (`gh issue create --template bug.md`): факт, repro, ожидание/факт, критерий
-   готовности, профиль, источник (issue/PR/отчёт/шаг smoke). Labels из шапки
-   (`bug`, `needs-triage`) применяет GitHub UI; при создании через `gh` укажи
-   их явно: `--label bug --label needs-triage`.
-2. Проставить `P0`–`P3`; для `P0` — ещё `incident`.
-3. P1–P3: продолжить текущую задачу. P0: остановиться, завести `hotfix`, после
-   §10 по инциденту вернуться к прерванной задаче (она остаётся `in-progress`).
-4. Триаж — до закрытия текущей задачи: каждой находке приоритет и владелец;
-   дубликаты и не-баги закрыть с причиной; остальное оставить в пуле.
-5. Находку в текущей задаче не править, даже если фикс тривиален
-   (`.omp/RULES.md` §5).
-   Исключение — блокер, без которого задачу нельзя довести до §10: он входит в
-   скоуп, отдельный issue не нужен, факт отметить в Report.
-
-**Лимиты:**
-
-- WIP = 1 `in-progress` на исполнителя. Параллельно — только непересекающиеся
-  файлы (§13.2), у каждой задачи свой `in-progress`.
-- Repro ≤3 попыток (одна переменная за попытку), Fix↔Validation ≤2 циклов, дальше
-  стоп и доклад (§13.4). Для `P0` лимит итераций не отменяется.
-- Открытых `P0`/`incident` — 0 в норме; `P1` — не больше 5 одновременно. При
-  превышении следующий слот идёт на разбор очереди, а не на новую фичу.
-
-**Закрытие и метрики:**
-
-- Старт = метка `in-progress` (таймстемп в timeline). Финиш = `Closes #N` в
-  коммите или close с отчётом, если кода нет. `closedAt` — единственный
-  timestamp, которому верим.
-- Время: `node scripts/loop-metrics.mjs --from <N> --to <M>` — GitHub API,
-  старт из `in-progress`, fallback — закрытие предыдущей issue; печатает
-  среднее и медиану. Отчёт без этой команды не принимается; оценка «на глаз» и
-  самоотчёт вместо измерения — дефект отчёта.
-- При закрытии: снять `in-progress`; `blocked` — если ждём внешнее событие;
-  `hotfix` — если фикс пришёл вне плана.
-
-**Прогон (execution loop) и инструментация:**
-
-Loop не включается сам: обычная задача идёт одним профилем, issues не создаются,
-метрики не пишутся. Режим включается явно — токеном `loop-run` в запросе
-(синонимы: «execution loop», «пул задач»), либо существующим milestone. Это
-контрактный токен, а не shell/slash-команда: его обязан распознать любой
-harness, прочитавший этот раздел.
-
-**Вход прогона (что даёт пользователь):** список фич и список рефакторинга
-(можно сырой), разрешения (`issues/milestone`, `commit`, `push/PR`), границы
-(что не входит) и ветку. Без разрешения на commit loop не запускается: issues
-не закроются, метрики будут неполными.
-
-**Что делает исполнитель:**
-
-1. Research до создания задач: читает код, режет список на issues с критериями,
-   файлами, профилем и приоритетом. **Крупная фича = эпик: заводится tracking-issue
-   с меткой `epic` и чеклистом стори, и разбивается на story-issues (метка `story`,
-   тот же milestone, `loop-run`).** Неразрешимая ambiguity — либо консервативное
-   допущение в issue, либо `asked-user` (это остановка и вмешательство).
-2. Создаёт milestone `run-…` и issues по шаблону с `loop-run` и `P0–P3`. Каждая
-   story — отдельный issue с критерием готовности; эпик — обёртка со ссылками на
-   стори и сквозным критерием приёмки (не закрывается, пока не закрыты все стори).
-3. Выполняет P0 → P1 → P2 → P3, WIP=1, §10 на каждую задачу, `Closes #N`.
-   Фичи и рефакторинг — отдельные issues и коммиты, диффы не смешивать.
-4. Финал: полный §10, `loop-metrics`, CHANGELOG, run-отчёт в `swarm-report/`.
-
-- Прогон = GitHub milestone (`run-YYYY-MM-DD[-N]`). Все issues пула получают этот
-  milestone и метку `loop-run`; первая — `in-progress`.
-- Первая попытка не прошла: `iteration:2` + ровно один `cause:*`:
-  `cause:context` (не понял контекст), `cause:code` (нерабочий код),
-  `cause:loop` (зациклился), `cause:test` (ошибка в тесте),
-  `cause:premise` (ложная посылка).
-- Исполнитель остановился спросить пользователя: `asked-user`, причина — в
-  комментарии. Другие сообщения пользователя GitHub API не видны: их число
-  фиксируется в run-отчёте.
-
-|Метрика|Источник|Если не инструментировано|
-|---|---|---|
-|задач подряд без остановок|issues milestone − `asked-user`|`n/a`|
-|на чём сломался и почему|`iteration:2` + `cause:*`|`n/a`|
-|среднее время|`in-progress`/`Closes #N`|fallback-интервалы|
-|с первого раза|closed с `loop-run` без `iteration:2`|`n/a`|
-
-`node scripts/loop-metrics.mjs --milestone <name>` печатает все четыре.
-Отсутствие метки — это `n/a`, а не 0 и не оценка: метрика без метки не
-существует.
+- Tracker: GitHub issues via `.github/ISSUE_TEMPLATE/bug.md`/`feature.md`;
+  create with `gh issue create --template bug.md --label bug --label needs-triage`.
+- Labels: `P0`–`P3` (+ `incident` for P0), `loop-run`, `in-progress`,
+  `asked-user`, `iteration:2`, `cause:context|code|loop|test|premise`, `epic`,
+  `story`, `blocked`, `hotfix`. A priority without an issue label does not exist.
+- Milestone — §13.1.1; close with `Closes #N`.
+- Caps: `P1 ≤5` (WIP/P0 targets per loop.md).
+- Metrics: `node scripts/loop-metrics.mjs --from <N> --to <M>` (or
+  `--milestone <name>`); missing labels are `n/a`, not zero.
+- Large work: epic issue + story issues in the same milestone; do not close the
+  epic before all stories.
+- Profile field in issue templates: stable ids
+  `business-feature | bug-search | research | project-graph`
+  (`agent-profiles/references/selection.md`); localized labels are in §13.1.
+- Findings: file an issue per this adapter; do not fix outside the current task.
+  Exception: P0/incident or a blocker without which §10 cannot be reached; record
+  it in the Report.
 
 ---
 
 ## 14. Git-дисциплина
 
 - Ветка на задачу: `day-NN` или `feat/<slug>`; PR в `main`, squash-merge.
+  В `loop-run` ветка по умолчанию — текущая `feat/*`, иначе `feat/<slug>` от
+  `main` (§13.1.1); вопрос о ветке не задаётся.
 - Коммит: `<scope>: <imperative>` (`day-11: add ...`, `web: fix ...`).
 - Не коммитьте `.env`, `.data/`, `web/.next/`, `swarm-report/`, `.shots/`.
-- Не делайте commit/push, если пользователь явно не попросил.
+- Не делайте commit/push, если пользователь явно не попросил. Вход в loop
+  (`loop-run`/синоним или существующий milestone) — явная просьба о commit в
+  milestone, но не о push/PR; явный запрет commit сохраняется (§13.1.1).
+- Orphan-файлы, созданные своей задачей, удаляйте; чужой мёртвый код не трогайте.
+- Без явного запроса не используйте `--no-verify`, `--no-gpg-sign`,
+  `-c commit.gpgsign=false`, `--force`; упавший hook чините, а не обходите.

@@ -25,6 +25,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Checklist
+import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Settings
@@ -110,6 +111,7 @@ fun DashboardScreen(
     onOpenProjects: () -> Unit,
     onOpenGamification: () -> Unit,
     onOpenTodos: () -> Unit,
+    onOpenCourse: () -> Unit,
 ) {
     val vm: DashboardViewModel = viewModel(
         factory = viewModelFactory { initializer { DashboardViewModel(container.repository) } }
@@ -162,6 +164,7 @@ fun DashboardScreen(
                 onOpenProjects = onOpenProjects,
                 onOpenGamification = onOpenGamification,
                 onOpenTodos = onOpenTodos,
+                onOpenCourse = onOpenCourse,
             )
         }
     }
@@ -175,6 +178,7 @@ private fun DashboardContent(
     onOpenProjects: () -> Unit,
     onOpenGamification: () -> Unit,
     onOpenTodos: () -> Unit,
+    onOpenCourse: () -> Unit,
 ) {
     val game = data.gamification
     Column(
@@ -387,6 +391,39 @@ private fun DashboardContent(
                     )
                 }
                 Button(onClick = onOpenTodos, shape = ArtelShapes.pill) {
+                    Text("Открыть", fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+
+        // Course quick action
+        BentoCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            onClick = onOpenCourse,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Rounded.School,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.tertiary,
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Курс", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "I2N Challenge: транскрипции, выдержки, таймкоды",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Button(onClick = onOpenCourse, shape = ArtelShapes.pill) {
                     Text("Открыть", fontWeight = FontWeight.SemiBold)
                 }
             }

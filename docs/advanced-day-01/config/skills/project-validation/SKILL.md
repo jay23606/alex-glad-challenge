@@ -5,6 +5,9 @@ description: Validation checklist and exact commands for alex-glad-challenge aft
 
 # Project validation
 
+> **Historical (ADVANCED Day 1).** Superseded by `AGENTS.md` §10 and
+> `.omp/skills/agent-profiles/`. Do not follow this copy.
+
 Run once after integration, not inside every subagent.
 
 ## Commands

@@ -19,6 +19,8 @@ import ru.memo7.artel.data.api.BlogStyleRequest
 import ru.memo7.artel.data.api.BootstrapResponse
 import ru.memo7.artel.data.api.CalendarResponse
 import ru.memo7.artel.data.api.CalendarSyncResponse
+import ru.memo7.artel.data.api.CourseLessonResponse
+import ru.memo7.artel.data.api.CourseLessonsResponse
 import ru.memo7.artel.data.api.CreateItemRequest
 import ru.memo7.artel.data.api.CreateProjectRequest
 import ru.memo7.artel.data.api.CreateTicketRequest
@@ -59,6 +61,8 @@ class ArtelRepository(private val store: CredentialsStore) {
     @Volatile var cachedGamification: GamificationResponse? = null
         private set
     @Volatile var cachedTodos: TodosResponse? = null
+        private set
+    @Volatile var cachedCourseLessons: CourseLessonsResponse? = null
         private set
 
     private suspend fun api(): Pair<Credentials, ArtelApi> {
@@ -149,6 +153,14 @@ class ArtelRepository(private val store: CredentialsStore) {
 
     suspend fun todos(): ApiResult<TodosResponse> = call { api ->
         api.todos().also { cachedTodos = it }
+    }
+
+    suspend fun courseLessons(): ApiResult<CourseLessonsResponse> = call { api ->
+        api.courseLessons().also { cachedCourseLessons = it }
+    }
+
+    suspend fun courseLesson(slug: String): ApiResult<CourseLessonResponse> = call { api ->
+        api.courseLesson(slug)
     }
 
     /* ---------- Writes ---------- */

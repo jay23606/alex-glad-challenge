@@ -1,5 +1,6 @@
 package ru.memo7.artel.ui.screens.automation
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -19,7 +20,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -43,11 +46,15 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -66,6 +73,7 @@ import ru.memo7.artel.core.network.ApiResult
 import ru.memo7.artel.data.ArtelRepository
 import ru.memo7.artel.data.api.AutomationResponse
 import ru.memo7.artel.data.api.AutomationRuleDto
+import ru.memo7.artel.data.normalizeBaseUrl
 import ru.memo7.artel.di.AppContainer
 import ru.memo7.artel.ui.components.PillBadge
 import ru.memo7.artel.ui.components.ScreenTitle
@@ -146,6 +154,41 @@ class AutomationViewModel(private val repository: ArtelRepository) : ViewModel()
     }
 }
 
+internal const val BLOG_POST_COMMAND = "/пост <блог> [publish] <тема> [| комментарий]"
+
+internal data class BlogHelpStep(
+    val title: String,
+    val text: String,
+)
+
+internal val blogHelpSteps = listOf(
+    BlogHelpStep(
+        "Выберите блог",
+        "Ниже карточки блогов. У каждого свои интервал, стиль и автопубликация.",
+    ),
+    BlogHelpStep(
+        "Решите про публикацию",
+        "«Автопубликация» выключена — пост останется черновиком. Включена — сразу уйдёт в Telegram блога.",
+    ),
+    BlogHelpStep(
+        "Промпты и расписание",
+        "На сайте: «Блоги» → «Настройки». Там же разовый пост по теме и слоты Сб/Вс.",
+    ),
+    BlogHelpStep(
+        "Праздничный пост из Telegram",
+        "$BLOG_POST_COMMAND. Без publish — черновик; список блогов — /блоги.",
+    ),
+    BlogHelpStep(
+        "Проверьте результат",
+        "«Запустить» создаёт пост сейчас. Черновики и публикации — в разделе «Посты» на сайте.",
+    ),
+)
+
+internal fun blogSettingsUrl(baseUrl: String?): String? {
+    val clean = baseUrl?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return "${normalizeBaseUrl(clean)}blog/settings"
+}
+
 /** Automation rules with switches, interval editing and recent runs. */
 @Composable
 fun AutomationScreen(container: AppContainer) {
@@ -154,6 +197,8 @@ fun AutomationScreen(container: AppContainer) {
     )
     val state by vm.state.collectAsStateWithLifecycle()
     val running by vm.running.collectAsStateWithLifecycle()
+    val appSettings by container.credentialsStore.settings.collectAsStateWithLifecycle(initialValue = null)
+    val webSettingsUrl = blogSettingsUrl(appSettings?.credentials?.baseUrl)
     val snackbarHostState = remember { SnackbarHostState() }
     var editingRule by remember { mutableStateOf<AutomationRuleDto?>(null) }
 
@@ -172,25 +217,41 @@ fun AutomationScreen(container: AppContainer) {
             StateContainer(
                 state = state,
                 onRetry = vm::refresh,
-                emptyCheck = { it.rules.isEmpty() },
-                emptyMessage = "Правил нет",
-                emptyHint = "Здесь появятся правила автопостинга ваших блогов",
             ) { data ->
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    items(data.rules, key = { it.blogId }) { rule ->
-                        RuleCard(
-                            rule = rule,
-                            running = running == rule.blogId,
-                            onRun = { vm.runNow(rule.blogId) },
-                            onToggle = { enabled -> vm.configure(rule, enabled, rule.intervalMinutes, rule.autoPublish) },
-                            onEdit = { editingRule = rule },
-                            onStylePreset = { preset -> vm.setStylePreset(rule, preset) },
-                            modifier = Modifier.animateItem(),
-                        )
+                    item(key = "help") { BlogCheatSheetCard(webSettingsUrl = webSettingsUrl) }
+                    if (data.rules.isEmpty()) {
+                        item(key = "empty") {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Text("Правил нет", style = MaterialTheme.typography.titleMedium)
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    "Здесь появятся правила автопостинга ваших блогов",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                        }
+                    } else {
+                        items(data.rules, key = { it.blogId }) { rule ->
+                            RuleCard(
+                                rule = rule,
+                                running = running == rule.blogId,
+                                onRun = { vm.runNow(rule.blogId) },
+                                onToggle = { enabled -> vm.configure(rule, enabled, rule.intervalMinutes, rule.autoPublish) },
+                                onEdit = { editingRule = rule },
+                                onStylePreset = { preset -> vm.setStylePreset(rule, preset) },
+                                modifier = Modifier.animateItem(),
+                            )
+                        }
                     }
                     if (data.runs.isNotEmpty()) {
                         item(key = "runs-title") { SectionTitle("Последние запуски") }
@@ -217,6 +278,108 @@ fun AutomationScreen(container: AppContainer) {
                 editingRule = null
             },
         )
+    }
+}
+
+@Composable
+private fun BlogCheatSheetCard(webSettingsUrl: String?, modifier: Modifier = Modifier) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val uriHandler = LocalUriHandler.current
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .animateContentSize()
+            .clip(ArtelShapes.card)
+            .background(MaterialTheme.colorScheme.surface),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(
+                    role = Role.Button,
+                    onClickLabel = if (expanded) "Свернуть шпаргалку" else "Показать шпаргалку",
+                ) { expanded = !expanded }
+                .padding(18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(ArtelShapes.chip)
+                    .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.18f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Rounded.HelpOutline,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Шпаргалка", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Как управлять блогами — 5 шагов",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                if (expanded) "Свернуть" else "Показать",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        AnimatedVisibility(visible = expanded) {
+            Column(
+                modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                blogHelpSteps.forEachIndexed { index, step ->
+                    BlogHelpStepRow(number = index + 1, step = step)
+                }
+                if (webSettingsUrl != null) {
+                    TextButton(onClick = { uriHandler.openUri(webSettingsUrl) }) {
+                        Text("Открыть веб-настройки")
+                    }
+                } else {
+                    Text(
+                        "Полные настройки — на сайте в разделе «Блоги» → «Настройки».",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BlogHelpStepRow(number: Int, step: BlogHelpStep) {
+    Row(verticalAlignment = Alignment.Top) {
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "$number",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(step.title, style = MaterialTheme.typography.labelLarge)
+            Text(
+                step.text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 

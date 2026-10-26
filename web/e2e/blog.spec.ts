@@ -19,6 +19,25 @@ test.describe('Блог (админ)', () => {
     }
   });
 
+  test('управление блогами: шпаргалка и раскрываемая TG-команда', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/blog/settings');
+
+    await expect(page.getByRole('heading', { name: 'Управление блогами' })).toBeVisible();
+    await expect(page.getByText('шпаргалка · как пользоваться')).toBeVisible();
+    await expect(page.getByText('Выберите блог', { exact: true })).toBeVisible();
+    await expect(page.getByText('Задайте расписание')).toBeVisible();
+
+    const summary = page.getByText('Telegram-команда и частые вопросы');
+    await expect(summary).toBeVisible();
+    await summary.click();
+
+    await expect(
+      page.getByText('/пост <блог> [publish] <тема> [| комментарий]'),
+    ).toBeVisible();
+    await expect(page.getByText(/Публикуется только первый вариант/)).toBeVisible();
+  });
+
   test('карточка поста: textarea со счётчиком, toolbar, verdict', async ({ page }) => {
     await page.goto('/blog/posts');
     const firstPost = page.locator('a[href^="/blog/posts/"]').first();

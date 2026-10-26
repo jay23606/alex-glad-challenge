@@ -79,4 +79,10 @@ interface ArtelApi {
 
     @POST("api/support/tickets")
     suspend fun createTicket(@Body body: CreateTicketRequest): Response<CreatedIdResponse>
+
+    @GET("api/course/lessons")
+    suspend fun courseLessons(): CourseLessonsResponse
+
+    @GET("api/course/lessons/{slug}")
+    suspend fun courseLesson(@Path("slug") slug: String): CourseLessonResponse
 }

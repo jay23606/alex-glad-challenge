@@ -1,5 +1,8 @@
 # AGENTS.md — правила проекта (v2, ADVANCED Day 1)
 
+> **Historical (ADVANCED Day 1).** Superseded by `AGENTS.md` and `.omp/RULES.md`.
+> Do not follow this copy.
+
 Единый контракт для ИИ-ассистентов, работающих с репозиторием
 `alex-glad-challenge`. Прочитайте до любых изменений. Файл описывает **текущую
 реальность репозитория**, а не историю первых десяти дней.

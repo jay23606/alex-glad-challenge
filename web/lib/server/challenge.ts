@@ -179,3 +179,7 @@ export type { AssistantSnapshot } from '@challenge/core/assistant';
 // не секреты; потребители маскируют.
 export { getGoogleCalendarConfig, getMobileApiToken } from '@challenge/core/env';
 export type { GoogleCalendarConfig } from '@challenge/core/env';
+// Course: база знаний по лекциям курса (I2N Challenge): уроки, таймкодс-секции,
+// курированные выдержки. Импорт — CLI course-import.
+export { CourseDb } from '@challenge/core/courseDb';
+export type { LessonRow, SectionRow, ExcerptRow, LessonInput } from '@challenge/core/courseDb';

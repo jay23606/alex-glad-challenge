@@ -215,6 +215,19 @@ res.status(500).json({
 });
 ```
 
+## Destructive Path Operations
+
+Before a destructive call, require all three conditions:
+
+1. The resolved target sits under an allowlisted root. Compare after resolving
+   symlinks, never on the raw string.
+2. It is at least one level below that root, so a root is never itself the target.
+3. It carries evidence that it is yours, read before the operation and before any
+   teardown that removes it; otherwise "absent" and "not mine" are indistinguishable.
+
+On refusal, log the rejected target and stop. A cleanup that falls back to a
+broader default path is the failure this guards against.
+
 ## OWASP Top 10 Quick Reference
 
 | # | Vulnerability | Prevention |

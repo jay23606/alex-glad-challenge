@@ -12,6 +12,7 @@ import { Field, INPUT_CLASS } from '../../components/ui/Field';
 import { SectionHead } from '../../components/ui/SectionHead';
 import { Textarea } from '../../components/ui/Textarea';
 import { useToast } from '../../components/ui/Toast';
+import { BlogCheatSheet } from './BlogCheatSheet';
 
 interface BlogOption {
   slug: string;
@@ -269,8 +270,8 @@ export default function BlogSettingsPage() {
     <div className="space-y-6">
       <SectionHead
         code="blog · settings"
-        title="Настройки блога"
-        description="Голос каждого блога: system prompt задаёт роль и правила, context prompt — постоянные факты и интонацию."
+        title="Управление блогами"
+        description="Выберите блог сверху: промпты, праздничный пост и расписание — здесь. Ниже — короткая шпаргалка."
         actions={
           <select
             aria-label="Блог"
@@ -287,6 +288,8 @@ export default function BlogSettingsPage() {
           </select>
         }
       />
+
+      <BlogCheatSheet />
 
       {config ? (
         <>
