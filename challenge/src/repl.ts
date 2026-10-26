@@ -1056,6 +1056,7 @@ async function handleNewsCommand(arg: string, state: SessionState): Promise<void
       topK,
       writeForIndex: forIndex,
       profile: state.profile,
+      log: console.log,
     });
 
     console.log('\n' + c.bold + '=== Топ-новости (агент 1) ===' + c.reset);
@@ -1492,6 +1493,7 @@ async function handleScoutCommand(arg: string, state: SessionState): Promise<voi
       enableTelegram: !noTelegram,
       enableForum: !noForum,
       ask: state.ask,
+      log: console.log,
     });
 
     // Показываем результаты каждого агента.
@@ -2041,7 +2043,7 @@ async function handleFilesCommand(arg: string): Promise<void> {
       }
       console.log(c.cyan + `▶ files refactor (${write ? 'write' : 'dry-run'}):` + c.reset + ' ' + goal + '\n');
       try {
-        printRefactorResult(await runRefactor(goal, { write }));
+        printRefactorResult(await runRefactor(goal, { write, log: console.log }));
       } catch (e) {
         printFilesError(e);
         return;
@@ -2059,7 +2061,7 @@ async function handleFilesCommand(arg: string): Promise<void> {
       }
       console.log(c.cyan + `▶ files scaffold (${write ? 'write' : 'dry-run'}):` + c.reset + ' ' + goal + '\n');
       try {
-        printScaffoldResult(await runScaffold(goal, { write }));
+        printScaffoldResult(await runScaffold(goal, { write, log: console.log }));
       } catch (e) {
         printFilesError(e);
         return;
@@ -2094,8 +2096,8 @@ async function handleFilesCommand(arg: string): Promise<void> {
       console.log(c.gray + `classify → ${cls.type}` + c.reset + '\n');
       try {
         if (cls.type === 'docs') printDocsResult(await runUpdateDocs(nl, { write: false }));
-        else if (cls.type === 'refactor') printRefactorResult(await runRefactor(nl, { write: false }));
-        else printScaffoldResult(await runScaffold(nl, { write: false }));
+        else if (cls.type === 'refactor') printRefactorResult(await runRefactor(nl, { write: false, log: console.log }));
+        else printScaffoldResult(await runScaffold(nl, { write: false, log: console.log }));
       } catch (e) {
         printFilesError(e);
         return;

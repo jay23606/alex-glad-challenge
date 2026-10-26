@@ -51,11 +51,18 @@ export interface RunIndexingOptions {
   embedder?: Embedder;
   fixed?: FixedChunkOptions;
   structured?: StructuredChunkOptions;
+  /** Прогресс в sink вызова (CLI = console.log). Default — тишина:
+   * runIndexing гоняется и из web, шуметь в stdout сервера нельзя (§8.2). */
+  onLog?: (line: string) => void;
 }
 
 // live-прогресс эмбеддинга одной стратегии: каждые ~5% — строка с ETA,
 // на 100% — итог. Считает ms/chunk по уже обработанным, ETA = rate × остаток.
-function makeIndexProgress(strategy: ChunkingStrategy, total: number): (done: number) => void {
+function makeIndexProgress(
+  strategy: ChunkingStrategy,
+  total: number,
+  onLog: (line: string) => void,
+): (done: number) => void {
   const start = Date.now();
   let lastBucket = -1;
   return (done: number) => {
@@ -66,12 +73,12 @@ function makeIndexProgress(strategy: ChunkingStrategy, total: number): (done: nu
     lastBucket = bucket;
     const elapsed = Date.now() - start;
     if (isDone) {
-      console.log(`  [${strategy} ${done}/${total} · 100% · готово за ${formatDuration(elapsed)}]`);
+      onLog(`  [${strategy} ${done}/${total} · 100% · готово за ${formatDuration(elapsed)}]`);
       return;
     }
     const rate = done > 0 ? elapsed / done : 0; // ms на чанк
     const eta = rate * (total - done);
-    console.log(
+    onLog(
       `  [${strategy} ${done}/${total} · ${pct}% · ~${formatDuration(eta)} left · ${Math.round(rate)}ms/chunk]`,
     );
   };
@@ -81,6 +88,7 @@ export async function runIndexing(
   store: RagStore,
   opts: RunIndexingOptions,
 ): Promise<IndexingResult> {
+  const onLog = opts.onLog ?? (() => {});
   const strategies = opts.strategies ?? RAG_STRATEGIES;
   const embedder = opts.embedder ?? makeEmbedder();
   const docs = await loadDocs(opts.docsDir);
@@ -96,11 +104,11 @@ export async function runIndexing(
   for (const strategy of strategies) {
     const chunks = docs.flatMap((d) => chunkDoc(d, strategy, { fixed: opts.fixed, structured: opts.structured }));
     totalChunks += chunks.length;
-    console.log(`▶ индексация: ${strategy} → ${chunks.length} чанков`);
+    onLog(`▶ индексация: ${strategy} → ${chunks.length} чанков`);
     store.clearStrategy(strategy);
-    await indexDocuments(store, strategy, chunks, embedder, 32, makeIndexProgress(strategy, chunks.length));
+    await indexDocuments(store, strategy, chunks, embedder, 32, makeIndexProgress(strategy, chunks.length, onLog));
     result[strategy] = store.stats(strategy);
   }
-  console.log(`[indexed ${totalChunks} chunks in ${formatDuration(Date.now() - totalStart)}]`);
+  onLog(`[indexed ${totalChunks} chunks in ${formatDuration(Date.now() - totalStart)}]`);
   return result;
 }

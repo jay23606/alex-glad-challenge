@@ -756,6 +756,7 @@ async function runNewsCommand(argv: string[]): Promise<void> {
       topK: flags.top,
       writeForIndex: flags.forIndex,
       profile,
+      log: console.log,
     });
 
     console.log('\n=== Топ-новости (агент 1) ===');
@@ -1370,7 +1371,7 @@ async function runFilesDocsCommand(goal: string, write: boolean): Promise<void> 
 async function runFilesRefactorCommand(goal: string, write: boolean): Promise<void> {
   console.log(`▶ files refactor (${write ? 'write' : 'dry-run'}): ${goal}\n`);
   try {
-    const res = await runRefactor(goal, { write });
+    const res = await runRefactor(goal, { write, log: console.log });
     console.log(`target: ${res.targetPath}`);
     if (res.cloudStatus !== 'ok') {
       console.log(CLOUD_DOWN_MESSAGE);
@@ -1398,7 +1399,7 @@ async function runFilesRefactorCommand(goal: string, write: boolean): Promise<vo
 async function runFilesScaffoldCommand(goal: string, write: boolean): Promise<void> {
   console.log(`▶ files scaffold (${write ? 'write' : 'dry-run'}): ${goal}\n`);
   try {
-    const res = await runScaffold(goal, { write });
+    const res = await runScaffold(goal, { write, log: console.log });
     console.log(`target: ${res.targetPath}`);
     if (res.cloudStatus !== 'ok') {
       console.log(CLOUD_DOWN_MESSAGE);
@@ -1604,7 +1605,7 @@ async function runRagCommand(argv: string[]): Promise<void> {
       const store = new RagStore(RAG_DB_PATH);
       try {
         console.log(`▶ RAG index: ${docsDir} → ${RAG_DB_PATH}`);
-        const result = await runIndexing(store, { docsDir, strategies });
+        const result = await runIndexing(store, { docsDir, strategies, onLog: console.log });
         for (const s of Object.keys(result)) {
           const st = result[s];
           console.log(`  ${s}: ${st.chunks} чанков, среднее ${st.avgLen} симв, dim=${st.dim ?? '-'}`);

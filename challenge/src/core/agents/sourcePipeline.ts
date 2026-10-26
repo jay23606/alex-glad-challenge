@@ -24,11 +24,15 @@ export async function runSourceAgents(
     sessionDir?: string;
     ask?: AskFn;
     signal?: AbortSignal;
+    /** Прогресс в sink вызова (CLI/REPL = console.log). Default — тишина:
+     * вызывается из web SSE, шуметь в stdout сервера нельзя (§8.2). */
+    log?: (line: string) => void;
   } = {},
 ): Promise<OrchestratorResult> {
   const maxAgeHours = opts.maxAgeHours ?? 24;
   const topK = opts.topK ?? 3;
   const userQuery = opts.userQuery ?? 'самые горячие футбольные новости';
+  const log = opts.log ?? (() => {});
 
   // Создаём агентов.
   const agents: SourceAgent[] = [
@@ -46,14 +50,14 @@ export async function runSourceAgents(
     agents.push(tgAgent);
   }
 
-  console.log(`[stage1] Запуск ${agents.length} агентов параллельно...`);
+  log(`[stage1] Запуск ${agents.length} агентов параллельно...`);
 
   // Параллельный запуск всех агентов.
   const results = await Promise.all(
     agents.map(async (agent) => {
-      console.log(`[stage1] ${agent.name}: старт...`);
+      log(`[stage1] ${agent.name}: старт...`);
       const result = await agent.fetch();
-      console.log(`[stage1] ${agent.name}: ${result.topics.length} тем${result.error ? ` (ошибка: ${result.error})` : ''}`);
+      log(`[stage1] ${agent.name}: ${result.topics.length} тем${result.error ? ` (ошибка: ${result.error})` : ''}`);
       return result;
     }),
   );
@@ -70,14 +74,14 @@ export async function runSourceAgents(
   // не запускаем тяжёлый LLM-шаг оркестратора. source-агенты не стримят через chatStream,
   // поэтому fetch-abort тут не действует (только guard между стадиями).
   opts.signal?.throwIfAborted();
-  console.log(`[stage1] Оркестратор: выбор топ-${topK}...`);
+  log(`[stage1] Оркестратор: выбор топ-${topK}...`);
   const orchestrator = new Orchestrator(client);
   const orchResult = await orchestrator.decide(results, userQuery, topK);
 
-  console.log(`[stage1] Оркестратор: выбрано ${orchResult.ranked.length} тем`);
+  log(`[stage1] Оркестратор: выбрано ${orchResult.ranked.length} тем`);
   for (const r of orchResult.ranked) {
-    console.log(`  [${r.orchestratorScore}] (${r.source}) ${r.title}`);
-    console.log(`    ${r.orchestratorReason}`);
+    log(`  [${r.orchestratorScore}] (${r.source}) ${r.title}`);
+    log(`    ${r.orchestratorReason}`);
   }
 
   return orchResult;
