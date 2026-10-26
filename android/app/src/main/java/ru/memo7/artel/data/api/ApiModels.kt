@@ -320,6 +320,84 @@ data class CreateTicketRequest(
     val contact: String? = null,
 )
 
+/* ---------- Chat ---------- */
+
+@Serializable
+data class ChatSessionListItemDto(
+    val id: String,
+    val strategy: String = "full",
+    val system: String? = null,
+    val memoryEnabled: Boolean = false,
+    val messageCount: Int = 0,
+    val createdAt: String? = null,
+    val updatedAt: String? = null,
+)
+
+@Serializable
+data class ChatSessionsResponse(
+    val sessions: List<ChatSessionListItemDto> = emptyList(),
+)
+
+@Serializable
+data class ChatCreateRequest(
+    val strategy: String = "full",
+    val system: String? = null,
+)
+
+@Serializable
+data class ChatSessionCreatedResponse(
+    val id: String,
+)
+
+@Serializable
+data class ChatUsageDto(
+    val prompt_tokens: Int = 0,
+    val completion_tokens: Int = 0,
+    val total_tokens: Int = 0,
+)
+
+@Serializable
+data class ChatHistoryMessageDto(
+    val role: String,
+    val content: String,
+    val ts: String? = null,
+)
+
+@Serializable
+data class ChatSessionDto(
+    val id: String,
+    val strategy: String = "full",
+    val system: String? = null,
+    val windowSize: Int = 10,
+    val usage: ChatUsageDto? = null,
+    val messages: List<ChatHistoryMessageDto> = emptyList(),
+)
+
+@Serializable
+data class ChatSessionResponse(
+    val session: ChatSessionDto,
+)
+
+@Serializable
+data class ChatSendRequest(
+    val text: String,
+    val llm: String? = null,
+)
+
+@Serializable
+data class ChatResetRequest(
+    val reset: Boolean = true,
+)
+
+@Serializable
+data class ChatSseEventDto(
+    val type: String,
+    val delta: String? = null,
+    val answer: String? = null,
+    val usage: ChatUsageDto? = null,
+    val message: String? = null,
+)
+
 /* ---------- Raw error body ---------- */
 
 @Serializable

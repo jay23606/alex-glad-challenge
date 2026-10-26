@@ -2,8 +2,16 @@ package ru.memo7.artel.data
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.TimeUnit
 import retrofit2.HttpException
 import ru.memo7.artel.core.network.ApiError
 import ru.memo7.artel.core.network.ApiFactory
@@ -19,6 +27,14 @@ import ru.memo7.artel.data.api.BlogStyleRequest
 import ru.memo7.artel.data.api.BootstrapResponse
 import ru.memo7.artel.data.api.CalendarResponse
 import ru.memo7.artel.data.api.CalendarSyncResponse
+import ru.memo7.artel.data.api.ChatCreateRequest
+import ru.memo7.artel.data.api.ChatResetRequest
+import ru.memo7.artel.data.api.ChatSessionCreatedResponse
+import ru.memo7.artel.data.api.ChatSessionResponse
+import ru.memo7.artel.data.api.ChatSendRequest
+import ru.memo7.artel.data.api.ChatSessionsResponse
+import ru.memo7.artel.data.api.ChatSseParser
+import ru.memo7.artel.data.api.ChatStreamEvent
 import ru.memo7.artel.data.api.CreateItemRequest
 import ru.memo7.artel.data.api.CreateProjectRequest
 import ru.memo7.artel.data.api.CreateTicketRequest
@@ -234,6 +250,100 @@ class ArtelRepository(private val store: CredentialsStore) {
     suspend fun askAssistant(message: String): ApiResult<AssistantResponse> = call { api ->
         api.assistant(AssistantRequest(message))
     }
+
+    /* ---------- Chat ---------- */
+
+    suspend fun chatSessions(): ApiResult<ChatSessionsResponse> = call { api ->
+        api.chatSessions()
+    }
+
+    suspend fun createChatSession(strategy: String, system: String?): ApiResult<ChatSessionCreatedResponse> =
+        call { api ->
+            api.createChatSession(ChatCreateRequest(strategy = strategy, system = system?.takeIf { it.isNotBlank() }))
+        }
+
+    suspend fun chatSession(sessionId: String): ApiResult<ChatSessionResponse> = call { api ->
+        api.chatSession(sessionId)
+    }
+
+    suspend fun resetChatSession(sessionId: String): ApiResult<ChatSessionResponse> = call { api ->
+        api.patchChatSession(sessionId, ChatResetRequest(reset = true))
+    }
+
+    @Volatile private var chatStreamCall: Call? = null
+
+    /** Отмена активного SSE-стрима («Остановить»): сервер обрывает LLM через req.signal. */
+    fun cancelChatStream() {
+        chatStreamCall?.cancel()
+    }
+
+    /**
+     * SSE-стрим ответа POST /api/chat/{sessionId}: безымянные события `data: <JSON>`,
+     * разделитель `\n\n`, конец потока = закрытие соединения сервером.
+     * Токены отдаются в [onEvent] по мере поступления; HTTP-ошибки маппятся как в [call].
+     */
+    suspend fun chatStream(sessionId: String, text: String, onEvent: (ChatStreamEvent) -> Unit): ApiResult<Unit> =
+        withContext(Dispatchers.IO) {
+            var usedToken: String? = null
+            try {
+                val (credentials, _) = api()
+                usedToken = credentials.token
+                val request = Request.Builder()
+                    .url(credentials.toRetrofitBaseUrl() + "api/chat/" + sessionId)
+                    .header("Authorization", "Bearer " + credentials.token.trim())
+                    .post(
+                        ApiFactory.json
+                            .encodeToString(ChatSendRequest.serializer(), ChatSendRequest(text = text))
+                            .toRequestBody("application/json".toMediaType()),
+                    )
+                    .build()
+                // Стрим: connect как у обычных запросов, readTimeout = 0 — паузы генерации не обрываем.
+                val call = OkHttpClient.Builder()
+                    .connectTimeout(15, TimeUnit.SECONDS)
+                    .readTimeout(0, TimeUnit.MILLISECONDS)
+                    .build()
+                    .newCall(request)
+                chatStreamCall = call
+                call.execute().use { response ->
+                    when {
+                        response.code == 401 -> {
+                            store.clearTokenIf(usedToken.orEmpty())
+                            throw ApiError.Unauthorized()
+                        }
+                        !response.isSuccessful -> {
+                            val raw = response.body?.string().orEmpty()
+                            val message = runCatching {
+                                ApiFactory.json.decodeFromString(ErrorResponse.serializer(), raw).error
+                            }.getOrNull()
+                            throw ApiError.Server(response.code, message ?: raw.take(200))
+                        }
+                    }
+                    val source = response.body?.source() ?: throw ApiError.BadResponse("Пустой ответ сервера")
+                    val buffer = StringBuilder()
+                    while (true) {
+                        currentCoroutineContext().ensureActive()
+                        val line = source.readUtf8Line() ?: break
+                        buffer.append(line).append('\n')
+                        ChatSseParser.drain(buffer, onEvent)
+                    }
+                    ApiResult.Success(Unit)
+                }
+            } catch (e: CancellationException) {
+                chatStreamCall?.cancel()
+                throw e
+            } catch (e: ApiError.Unauthorized) {
+                usedToken?.let { store.clearTokenIf(it) }
+                ApiResult.Failure(e)
+            } catch (e: ApiError) {
+                ApiResult.Failure(e)
+            } catch (e: java.io.IOException) {
+                // OkHttp cancel бьёт чтение сокета IOException("Canceled …") — это команда
+                // «Остановить», а не сетевой сбой: незакрытый partial остаётся в UI.
+                if (chatStreamCall?.isCanceled() == true) ApiResult.Success(Unit) else ApiResult.Failure(ApiError.Network(e))
+            } catch (e: Exception) {
+                ApiResult.Failure(ApiError.Network(e))
+            }
+        }
 
     suspend fun createTicket(subject: String, body: String, contact: String?): ApiResult<CreatedIdResponse> =
         call { api ->

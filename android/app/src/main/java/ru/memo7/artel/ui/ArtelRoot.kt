@@ -43,6 +43,8 @@ import ru.memo7.artel.ui.components.isCompactLayout
 import ru.memo7.artel.ui.screens.assistant.AssistantScreen
 import ru.memo7.artel.ui.screens.automation.AutomationScreen
 import ru.memo7.artel.ui.screens.calendar.CalendarScreen
+import ru.memo7.artel.ui.screens.chat.ChatScreen
+import ru.memo7.artel.ui.screens.chat.ChatsScreen
 import ru.memo7.artel.ui.screens.dashboard.DashboardScreen
 import ru.memo7.artel.ui.screens.gamification.GamificationScreen
 import ru.memo7.artel.ui.screens.notifications.NotificationsScreen
@@ -63,8 +65,11 @@ object Routes {
     const val SETTINGS = "settings"
     const val GAMIFICATION = "gamification"
     const val TODOS = "todos"
+    const val CHAT = "chat"
+    const val CHAT_DETAIL = "chat/{sessionId}"
     const val PROJECT_DETAIL = "project/{projectId}"
     fun projectDetail(id: Long) = "project/$id"
+    fun chatDetail(sessionId: String) = "chat/$sessionId"
 }
 
 /** Полное [label] доступен TalkBack через contentDescription иконки; [shortLabel] рисуется. */
@@ -170,6 +175,7 @@ fun ArtelRoot(container: AppContainer) {
                     onOpenProjects = { navController.navigate(Routes.PROJECTS) },
                     onOpenGamification = { navController.navigate(Routes.GAMIFICATION) },
                     onOpenTodos = { navController.navigate(Routes.TODOS) },
+                    onOpenChat = { navController.navigate(Routes.CHAT) },
                 )
             }
             composable(Routes.PROJECTS) {
@@ -181,6 +187,24 @@ fun ArtelRoot(container: AppContainer) {
             composable(Routes.AUTOMATION) { AutomationScreen(container) }
             composable(Routes.CALENDAR) { CalendarScreen(container) }
             composable(Routes.ASSISTANT) { AssistantScreen(container) }
+            composable(Routes.CHAT) {
+                ChatsScreen(
+                    container = container,
+                    onBack = { navController.popBackStack() },
+                    onOpenSession = { sessionId -> navController.navigate(Routes.chatDetail(sessionId)) },
+                )
+            }
+            composable(
+                route = Routes.CHAT_DETAIL,
+                arguments = listOf(navArgument("sessionId") { type = NavType.StringType }),
+            ) { entry ->
+                val sessionId = entry.arguments?.getString("sessionId").orEmpty()
+                ChatScreen(
+                    container = container,
+                    sessionId = sessionId,
+                    onBack = { navController.popBackStack() },
+                )
+            }
             composable(Routes.NOTIFICATIONS) {
                 NotificationsScreen(container, onBack = { navController.popBackStack() })
             }
