@@ -44,8 +44,10 @@ export class LlmClient {
       timeoutMs: 120_000, // генерация длинных постов бывает дольше дефолтных 15с
     });
     if (!resp.ok) {
-      const body = await resp.text().catch(() => '');
-      throw new Error(`LLM API error ${resp.status}: ${body}`);
+      // Гигиена ошибок как в chatStream: наружу — только статус; тело читаем,
+      // чтобы не оставлять открытой нечитанной streamed-модели, но не в текст.
+      await resp.text().catch(() => {});
+      throw new Error(`LLM API error ${resp.status}`);
     }
     return (await resp.json()) as LlmResponse;
   }
