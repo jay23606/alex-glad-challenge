@@ -8,7 +8,7 @@
 // урок импортируется с пустыми summary/why/pain/excerpts (полная транскрипция
 // доступна и без курирования).
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { clean } from './sanitize.js';
@@ -129,6 +129,10 @@ export function buildSections(utterances: ReadonlyArray<TranscriptUtterance>): B
 /** Прочитать курированные метаданные <metaDir>/<slug>.json (или null). */
 export function loadLessonMeta(metaDir: string, slug: string): LessonMeta | null {
   const file = path.join(metaDir, `${slug}.json`);
+  // Отсутствие файла — штатная деградация (урок без курирования). Битый
+  // JSON/"частично валидный" файл — ошибка данных: молча глотать её нельзя,
+  // оператор должен увидеть причину, а не только «без метаданных» в CLI.
+  if (!existsSync(file)) return null;
   try {
     const data = JSON.parse(readFileSync(file, 'utf8')) as Partial<LessonMeta>;
     if (typeof data.title !== 'string' || !data.title.trim()) return null;
@@ -148,7 +152,9 @@ export function loadLessonMeta(metaDir: string, slug: string): LessonMeta | null
       pain: typeof data.pain === 'string' ? data.pain : '',
       excerpts,
     };
-  } catch {
+  } catch (err) {
+    const m = err instanceof Error ? err.message : String(err);
+    console.error(`courseImport: метаданные ${file} повреждены и пропущены (${m})`);
     return null;
   }
 }

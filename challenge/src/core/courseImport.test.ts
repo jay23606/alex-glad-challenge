@@ -164,6 +164,25 @@ test('buildLessonInput бросает для файла без распозна�
   }
 });
 
+test('loadLessonMeta: битый json не глотается молча — diagnostics + деградация (issue #140)', (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'course-meta-corrupt-'));
+  try {
+    writeFileSync(path.join(dir, 'week-9.json'), '{ это не валидный json');
+    const errors: string[] = [];
+    t.mock.method(console, 'error', (line: string) => errors.push(String(line)));
+
+    assert.equal(loadLessonMeta(dir, 'week-9'), null);
+    assert.equal(errors.length, 1, 'битые метаданные должны предупредить, а не молчать');
+    assert.match(errors[0]!, /courseImport.*week-9\.json/);
+
+    // Отсутствие файла — штатный случай: без warning.
+    assert.equal(loadLessonMeta(dir, 'week-77'), null);
+    assert.equal(errors.length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('buildSections не рвёт короткий хвост в отдельную секцию', () => {
   const utterances = [
     { start: 0, end: 170_000, text: 'Длинная первая часть, которая занимает почти все три минуты и чья-то мысль' },
