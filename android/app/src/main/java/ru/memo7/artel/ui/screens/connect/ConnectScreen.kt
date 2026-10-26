@@ -58,7 +58,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
-import ru.memo7.artel.BuildConfig
 import ru.memo7.artel.core.network.ApiFactory
 import ru.memo7.artel.data.Credentials
 import ru.memo7.artel.data.CredentialsStore
@@ -78,22 +77,17 @@ data class ConnectUiState(
 
 class ConnectViewModel(
     private val store: CredentialsStore,
-    private val bakedServerUrl: String,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ConnectUiState())
     val state: StateFlow<ConnectUiState> = _state.asStateFlow()
 
-    /** true — адрес зашит при сборке, поле URL скрыто; false — dev-fallback с ручным вводом. */
-    val hasBakedUrl: Boolean = bakedServerUrl.isNotBlank()
-
     init {
-        if (!hasBakedUrl) {
-            viewModelScope.launch {
-                store.lastServerUrl.collect { url ->
-                    if (!url.isNullOrBlank()) {
-                        _state.update { it.copy(serverUrl = it.serverUrl.ifBlank { url }) }
-                    }
+        // Последний успешный адрес подставляется всегда — и после logout/401 тоже.
+        viewModelScope.launch {
+            store.lastServerUrl.collect { url ->
+                if (!url.isNullOrBlank()) {
+                    _state.update { it.copy(serverUrl = it.serverUrl.ifBlank { url }) }
                 }
             }
         }
@@ -105,16 +99,12 @@ class ConnectViewModel(
     fun connect() {
         val current = _state.value
         if (current.busy) return
-        val url = (if (hasBakedUrl) bakedServerUrl else current.serverUrl).trim()
+        ConnectRules.validate(current.serverUrl, current.password)?.let { error ->
+            _state.update { it.copy(error = error) }
+            return
+        }
+        val url = current.serverUrl.trim()
         val password = current.password.trim()
-        if (url.isEmpty()) {
-            _state.update { it.copy(error = "Введите адрес сервера") }
-            return
-        }
-        if (password.isEmpty()) {
-            _state.update { it.copy(error = "Введите пароль") }
-            return
-        }
         _state.update { it.copy(busy = true, error = null) }
         viewModelScope.launch {
             val token = login(url, password) ?: return@launch
@@ -153,10 +143,10 @@ class ConnectViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (e: java.io.IOException) {
-            fail("Сервер недоступен: ${e.message ?: "нет соединения"}")
+            fail(ConnectRules.describeConnectFailure(e.message))
             null
         } catch (e: Exception) {
-            fail("Сервер недоступен: ${e.message ?: "нет соединения"}")
+            fail(ConnectRules.describeConnectFailure(e.message))
             null
         }
     }
@@ -171,10 +161,10 @@ class ConnectViewModel(
         fail("Ошибка сервера (${e.code()}): ${e.errorText().ifBlank { "нет описания" }}")
         false
     } catch (e: java.io.IOException) {
-        fail("Сервер недоступен: ${e.message ?: "нет соединения"}")
+        fail(ConnectRules.describeConnectFailure(e.message))
         false
     } catch (e: Exception) {
-        fail("Сервер недоступен: ${e.message ?: "нет соединения"}")
+        fail(ConnectRules.describeConnectFailure(e.message))
         false
     }
 
@@ -192,12 +182,12 @@ class ConnectViewModel(
     }
 }
 
-/** Entry screen: password login; the server URL is baked at build time, a manual field stays only as dev fallback. */
+/** Entry screen: the user types the server address (like a site URL) and the workspace password. */
 @Composable
 fun ConnectScreen(container: AppContainer) {
     val vm: ConnectViewModel = viewModel(
         factory = viewModelFactory {
-            initializer { ConnectViewModel(container.credentialsStore, BuildConfig.DEFAULT_SERVER_URL) }
+            initializer { ConnectViewModel(container.credentialsStore) }
         }
     )
     val state by vm.state.collectAsStateWithLifecycle()
@@ -236,19 +226,17 @@ fun ConnectScreen(container: AppContainer) {
         )
         Spacer(Modifier.height(28.dp))
 
-        if (!vm.hasBakedUrl) {
-            OutlinedTextField(
-                value = state.serverUrl,
-                onValueChange = vm::onUrlChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Адрес сервера") },
-                placeholder = { Text("http://10.0.2.2:3000") },
-                singleLine = true,
-                shape = ArtelShapes.chip,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-            )
-            Spacer(Modifier.height(12.dp))
-        }
+        OutlinedTextField(
+            value = state.serverUrl,
+            onValueChange = vm::onUrlChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Адрес сервера") },
+            placeholder = { Text("https://artel.example.com") },
+            singleLine = true,
+            shape = ArtelShapes.chip,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next, keyboardType = KeyboardType.Uri),
+        )
+        Spacer(Modifier.height(12.dp))
         var showPassword by remember { mutableStateOf(false) }
         OutlinedTextField(
             value = state.password,

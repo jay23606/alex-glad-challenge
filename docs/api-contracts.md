@@ -52,8 +52,9 @@ levelProgress = (xp − xpForLevel(level − 1)) / (xpForLevel(level) − xpForL
 ## Мобильный вход: `POST /api/mobile/login`
 
 Источник: `web/app/api/mobile/login/route.ts`. Вход приложения Артель по паролю
-рабочего пространства (`WEB_ADMIN_PASSWORD`); адрес сервера преднастраивается
-при сборке (Gradle property `artel.serverUrl`), пароль в APK не зашивается.
+рабочего пространства (`WEB_ADMIN_PASSWORD`); адрес сервера пользователь
+вводит в приложении при первом входе (как адрес сайта) и он запоминается
+на устройстве как последний успешный; пароль в APK не зашивается.
 Cookie НЕ выдаётся — наружу только stateless session-токен (тот же
 `createSessionValue()`, что у cookie-сессии админа: HMAC, TTL 7 дней).
 Rate-limit общий с `/api/auth/login`: 10 неудач / 15 мин, глобальное окно.
