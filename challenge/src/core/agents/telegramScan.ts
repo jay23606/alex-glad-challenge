@@ -203,7 +203,11 @@ export async function connectScanClient(): Promise<boolean> {
     const raw = new TelegramClient(new StringSession(sessionStr), apiId, apiHash, clientParams);
     // DC2: 149.154.167.51:80 — но подключаемся через туннель,
     // поэтому IP/port не имеют значения (connect() игнорирует их в нашем TcpTunnel)
-    (raw as any).session.setDC(2, '149.154.167.51', 80);
+    // Граница gram.js: типизация TelegramClient не экспортирует session.setDC,
+    // но рантайм-объект StringSession её имеет — сужающий каст вместо any.
+    const session = (raw as unknown as { session: { setDC(dc: number, ip: string, port: number): void } })
+      .session;
+    session.setDC(2, '149.154.167.51', 80);
     await Promise.race([
       raw.connect(),
       new Promise<never>((_, reject) =>
