@@ -74,6 +74,20 @@ interface ArtelApi {
     @POST("api/assistant")
     suspend fun assistant(@Body body: AssistantRequest): AssistantResponse
 
+    /* ---------- Chat ---------- */
+
+    @GET("api/chat")
+    suspend fun chatSessions(): ChatSessionsResponse
+
+    @POST("api/chat")
+    suspend fun createChatSession(@Body body: ChatCreateRequest): ChatSessionCreatedResponse
+
+    @GET("api/chat/{sessionId}")
+    suspend fun chatSession(@Path("sessionId") sessionId: String): ChatSessionResponse
+
+    @PATCH("api/chat/{sessionId}")
+    suspend fun patchChatSession(@Path("sessionId") sessionId: String, @Body body: ChatResetRequest): ChatSessionResponse
+
     @GET("api/support/faq")
     suspend fun faq(@Query("q") query: String): FaqResponse
 

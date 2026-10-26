@@ -4,7 +4,7 @@ Native Android client for the «Артель» workspace web API. Kotlin + Jetpa
 
 ## Features
 
-- **Подключение** — вход по паролю рабочего пространства (`POST /api/mobile/login`); сервер преднастраивается при сборке через Gradle property `artel.serverUrl`, а выданная сессия (token) хранится в DataStore и проверяется `GET /api/mobile/bootstrap`. Пароль нигде не сохраняется и не зашивается в APK.
+- **Подключение** — вход по паролю рабочего пространства (`POST /api/mobile/login`); адрес сервера пользователь вводит в приложении (см. «Сервер и вход» ниже), а выданная сессия (token) хранится в DataStore и проверяется `GET /api/mobile/bootstrap`. Пароль нигде не сохраняется.
 - **Главная** — XP level ring, streak, achievements, workspace counts, notification badge.
 - **Геймификация** — XP/уровень с кольцом прогресса, серия и рекорд, достижения (открытые/закрытые) и журнал очков (`GET /api/gamification`); вход — тап по кольцу уровня или карточке достижения на главной.
 - **Проекты** — list, create (name/description/color), project detail with notes/tasks/links, done toggling, item creation.
@@ -97,26 +97,19 @@ The debug APK lands in `app/build/outputs/apk/debug/app-debug.apk` (~17 МБ). I
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
-In the app, enter the workspace password and tap «Войти» (builds without `artel.serverUrl` additionally ask for the server origin, see below).
+In the app, enter the workspace server address — just as you would type a site URL in a browser — and the workspace password, then tap «Войти» (see below).
 
 ## Сервер и вход
 
-- **Адрес сервера при сборке.** По умолчанию приложение собирается с пустым адресом и показывает поле «Адрес сервера» (dev-fallback). Чтобы зашить адрес в APK, передайте Gradle property при сборке — он попадёт в `BuildConfig.DEFAULT_SERVER_URL`:
-
-  ```bash
-  .\gradlew.bat :app:assembleDebug -Partel.serverUrl=http://192.168.1.50:3000   # Windows
-  ./gradlew :app:assembleDebug -Partel.serverUrl=https://artel.example.com      # Linux/macOS
-  ```
-
-  Личный адрес в репозиторий не коммитится: передавайте его только в команде сборки или в локальном `gradle.properties` вне git.
-- **Вход по паролю.** На экране входа — только пароль рабочего пространства: `POST /api/mobile/login` возвращает session token, приложение проверяет подключение `GET /api/mobile/bootstrap` и сохраняет токен в DataStore. Неверный пароль — «Неверный пароль»; пароль на устройстве не хранится. Токен живёт 7 дней; 401 от любого API-запроса означает «Сессия истекла. Войдите заново.» и возвращает на экран входа: сборка с `artel.serverUrl` использует тот же адрес, dev-сборка подставляет последний введённый.
+- **Адрес сервера.** Пользователь вводит адрес рабочей области прямо в приложении — так же, как вводит адрес сайта в браузере (например, `https://artel.example.com` или `http://192.168.1.50:3000`). Адрес без схемы дополняется `http://` до дефолтного. Успешно подключённый адрес запоминается на устройстве и подставляется при следующем входе; после logout или истечения сессии поле предзаполнено последним успешным адресом, и его можно изменить в любой момент. В APK ничего не зашивается — приложение универсально: подходит для любой рабочей области с этим API.
+- **Вход по паролю.** Второе поле — пароль рабочего пространства: `POST /api/mobile/login` возвращает session-токен, приложение проверяет подключение `GET /api/mobile/bootstrap` и сохраняет токен в DataStore. Неверный пароль — «Неверный пароль»; пароль на устройстве не хранится. Токен живёт 7 дней; 401 от любого API-запроса означает «Сессия истекла. Войдите заново.» и возвращает на экран входа с предзаполненным адресом.
 - **Доступность сервера.** Телефон должен достучаться до сервера напрямую: в той же Wi-Fi/LAN-сети (адрес вида `http://192.168.x.x:3000`) или через VPN вроде Tailscale. Эмулятору доступен `http://10.0.2.2:3000` (host-машина). Cleartext-HTTP разрешён только в debug-сборках; для продакшена используйте HTTPS за reverse-proxy.
-- **«Сервер недоступен: failed to connect … after 15000ms».** Ошибка TCP-подключения (`connectTimeout` в `ApiFactory`), она возникает **до** отправки HTTP-запроса — до проверки пароля дело не доходит, пароль ни при чём. Чеклист по порядку:
+- **«Сервер не отвечает — проверьте адрес и сеть»** (техническая форма: «Сервер недоступен: failed to connect … after 15000ms» из OkHttp; приложение переводит её через `ConnectRules.describeConnectFailure`). Ошибка TCP-подключения (`connectTimeout` в `ApiFactory`), она возникает **до** отправки HTTP-запроса — до проверки пароля дело не доходит, пароль ни при чём. Чеклист по порядку:
   1. Сервер запущен? На машине с сервером локально должен отвечать `http://127.0.0.1:3000` (например, POST на `/api/mobile/login` с пустым телом отдаёт HTTP 400/401 — это подтверждает живой endpoint).
   2. Штатные скрипты репо bind'ят сервер только на `127.0.0.1` (`web/package.json`: `dev`/`start`), поэтому телефон по сети его не увидит. Для телефона поднимайте сервер доступным ему способом: на Tailscale-IP — `pnpm --filter web exec next dev -H <tailscale-ip>` (как в приёмке 2026-10-25, см. CHANGELOG), либо держите loopback и открывайте наружу через `tailscale serve` (даёт HTTPS из коробки).
   3. Телефон идёт через VPN? В ошибке `from /<ip>:<port>` — это адрес источника на телефоне: `192.168.x.x`/`10.x.x.x` = запрос шёл мимо VPN (в момент ошибки Tailscale на телефоне был выключен/не поднят), `100.x.x.x` = запрос шёл через tailnet. Включите Tailscale на телефоне и повторите.
   4. Firewall: если после пунктов 1–3 таймаут остался — разрешите входящий TCP 3000 на tailnet-интерфейсе (правило с ограничением по источникам `100.64.0.0/10`, не «всем»).
-  5. Release-сборка? `http://` в ней запрещён network security config — текст ошибки был бы другим, но если планируется release-сборка, URL должен быть HTTPS.
+  5. Release-сборка? `http://` в ней запрещён network security config — приложение вернёт «Сервер требует защищённое соединение»: для release URL должен быть HTTPS.
 
 ## API
 

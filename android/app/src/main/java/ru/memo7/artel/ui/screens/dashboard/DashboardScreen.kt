@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Chat
 import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Folder
@@ -112,6 +113,7 @@ fun DashboardScreen(
     onOpenGamification: () -> Unit,
     onOpenTodos: () -> Unit,
     onOpenCourse: () -> Unit,
+    onOpenChat: () -> Unit,
 ) {
     val vm: DashboardViewModel = viewModel(
         factory = viewModelFactory { initializer { DashboardViewModel(container.repository) } }
@@ -165,6 +167,7 @@ fun DashboardScreen(
                 onOpenGamification = onOpenGamification,
                 onOpenTodos = onOpenTodos,
                 onOpenCourse = onOpenCourse,
+                onOpenChat = onOpenChat,
             )
         }
     }
@@ -179,6 +182,7 @@ private fun DashboardContent(
     onOpenGamification: () -> Unit,
     onOpenTodos: () -> Unit,
     onOpenCourse: () -> Unit,
+    onOpenChat: () -> Unit,
 ) {
     val game = data.gamification
     Column(
@@ -359,6 +363,39 @@ private fun DashboardContent(
                             )
                         }
                     }
+                }
+            }
+        }
+
+        // Chat quick action
+        BentoCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            onClick = onOpenChat,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Rounded.Chat,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.tertiary,
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Чат", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Диалоги с LLM рабочей области — те же сессии, что на сайте",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Button(onClick = onOpenChat, shape = ArtelShapes.pill) {
+                    Text("Открыть", fontWeight = FontWeight.SemiBold)
                 }
             }
         }

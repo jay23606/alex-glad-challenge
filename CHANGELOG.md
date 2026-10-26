@@ -1763,3 +1763,100 @@ Bearer-токен) — анонимный просмотр недоступен;
 `android/.../ui/screens/course/`, `android/.../data/api/{ApiModels,ArtelApi}.kt`,
 `android/.../data/ArtelRepository.kt`, `android/.../ui/ArtelRoot.kt`,
 `android/.../ui/screens/dashboard/DashboardScreen.kt`.
+
+---
+
+## Android: вход как на сайте — адрес сервера вводится в приложении (2026-10-26)
+**Дата:** 2026-10-26. Профиль «Бизнес-фича» (loop-run), milestone run-2026-10-26.
+
+**Задание:** приложение должно быть пригодно для любых пользователей — так
+же, как любой может открыть сайт: адрес рабочей области вводит сам
+пользователь (как URL сайта в браузере), админка под паролем. Механика
+«адрес зашивается при сборке через `-Partel.serverUrl` →
+`BuildConfig.DEFAULT_SERVER_URL`, поле адреса скрыто» удалена полностью.
+
+**Что сделано:**
+- Android: `ConnectViewModel` без параметра `bakedServerUrl` и флага
+  `hasBakedUrl`; поле «Адрес сервера» всегда показывается и редактируется;
+  последний успешный адрес подставляется безусловно (и после
+  logout/401) из DataStore (`lastServerUrl`). Placeholder нейтральный
+  `https://artel.example.com`, клавиатура URL.
+- Android: чистый `ConnectRules` (валидация ввода + человекочитаемые
+  причины сбоев: unresolved host / cleartext в release / таймаут-подключение)
+  — VM-ветки `IOException` Login и bootstrap теперь дают конкретную
+  подсказку, а не сырой `e.message`; +9 юнит-тестов.
+- Gradle: удалены baked-блок и `buildConfig = true` (BuildConfig больше
+  никем не используется); версия 1.1.0 (versionCode 3).
+- Docs: `android/README.md` — механика «адрес + пароль» без зашивания;
+  `docs/api-contracts.md` — то же в контракте мобильного входа.
+
+**Проверки:** Android `:app:testDebugUnitTest :app:assembleDebug` —
+successfully, 55 юнит-тестов (+9 `ConnectRulesTest`); `git diff` — только
+файлы задачи. Web/challenge не менялись (typecheck из предыдущего прогона —
+чисто).
+
+**Риски/ограничения:** как и прежде: сервер по адресу, который ввёл
+пользователь, должен быть запущен и доступен с телефона (LAN/Tailscale);
+cleartext только в debug-сборках, release требует https-адреса. Полный
+паритет экранов приложения с web-админкой (rag/chat/tg/blog/mcp/sys/
+integrations) — backlog в issue эпика (milestone run-2026-10-26).
+
+**Код:** `android/app/build.gradle.kts`,
+`android/.../ui/screens/connect/ConnectScreen.kt`,
+`android/.../ui/screens/connect/ConnectRules.kt`,
+`android/app/src/test/java/ru/memo7/artel/ui/screens/connect/ConnectRulesTest.kt`,
+`android/README.md`, `docs/api-contracts.md`.
+
+---
+
+## Android: чат — MVP-паритет web /chat (2026-10-26)
+**Дата:** 2026-10-26. Профиль «Бизнес-фича» (loop-run), milestone
+run-2026-10-26, стори #137 эпика #134 (паритет web↔app).
+
+**Задание:** функциональный блок «Чат» в приложении «Артель»: те же сессии, что
+на web `/chat` — список, создание с выбором стратегии памяти и системного
+промпта, переписка с живым SSE-стримингом, остановка генерации, сброс
+истории. Скоуп MVP не включает `joker/antonov`, панели
+memory/branch/profile/constraints — они остаются в backlog эпика.
+
+**Что сделано:**
+- Чистый SSE-парсер `data/api/ChatStream.kt`: безымянные события
+  `data: <JSON>` через `\n\n` (контракт web `web/lib/shared/sse.ts`:
+  `token{delta}` / `done{answer,usage}` / `error{message}`; конец потока —
+  закрытие соединения, `[DONE]`-сентинела нет). Session-feed API
+  (`drain`), битые/неизвестные события молча пропускаются.
+- Репозиторий: `chatSessions`, `createChatSession`, `chatSession`,
+  `resetChatSession` (Retrofit) и `chatStream` — OkHttp напрямую
+  (readTimeout 0, connect 15 c, Bearer как в остальных запросах; 401
+  очищает токен той сессии, что шла в запрос — как в общем каркасе).
+  Отмена стрима (`cancelChatStream`) — кнопка «Остановить»; okhttp call
+  cancel не роняет UI: partial текст остаётся в пузыре.
+- Экраны: `ChatsScreen` (список сессий + диалог создания: стратегия
+  full/sliding/sticky/branching, системный промпт ≤2000) и `ChatScreen`
+  (история из GET /api/chat/[id] без системных реплик, пузыри со
+  стрим-текстом, стоп, сброс с подтверждением, счётчик токенов в шапке).
+  Вход: карточка «Чат» на дашборде + маршруты `chat` / `chat/{sessionId}`.
+- Тесты: `ChatStreamTest` (5 кейсов парсера: последовательность,
+  чанки-дописывание, битый JSON, неизвестные события, пробелы после
+  `data:`), `ChatContractTest` (декодирование сессии/списка, кодирование
+  запросов).
+
+**Проверки:** `:app:testDebugUnitTest :app:assembleDebug` — зелёные;
+контракт — против реальных строк SSE-формата из
+`web/app/api/chat/[sessionId]/route.ts` (data-prefix, `\n\n`, три типа
+событий). Diff — только файлы чата. Новых зависимостей НЕТ (okhttp-sse не
+добавлялся — парсер ручной).
+
+**Риски/ограничения:** usage в стриме — аппроксимация сервера (символы/4);
+при 401 экран остаётся с ошибкой, повторный вход — как для остальных
+разделов; панели памяти/веток прикреплены к следующим стори эпика #134.
+
+**Код:** `android/.../data/api/ChatStream.kt`,
+`android/.../data/api/ApiModels.kt` (chat-секция),
+`android/.../data/api/ArtelApi.kt`, `android/.../data/ArtelRepository.kt`,
+`android/.../ui/screens/chat/ChatsScreen.kt`,
+`android/.../ui/screens/chat/ChatScreen.kt`,
+`android/.../ui/ArtelRoot.kt`,
+`android/.../ui/screens/dashboard/DashboardScreen.kt`,
+`android/app/src/test/java/ru/memo7/artel/data/api/ChatStreamTest.kt`,
+`android/app/src/test/java/ru/memo7/artel/data/api/ChatContractTest.kt`.
