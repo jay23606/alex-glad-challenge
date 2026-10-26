@@ -23,6 +23,15 @@ harness global/defaults.
    `agent-profiles`, apply its loop defaults plus the project adapter, print them
    in one line, and record assumptions in the Report. Questions only for the
    adapter's ask exceptions.
+8. **Finish the session's scope.** A multi-step request gets a todo plan
+   (todowrite) before the first edit; a turn ends only when every todo is
+   completed/cancelled or genuinely blocked by an ask-exception. Never end a turn
+   on a bare tool result mid-plan; end with status: done + summary, or blocker +
+   question.
+9. **Resume without ceremony.** After any interruption (cut turn, «продолжай»,
+   "continue"): the first action is re-checking the todo list / Report "Next" and
+   resuming from the first open item immediately — no re-planning, no "shall I
+   continue" question, no re-confirmation of already-approved defaults.
 
 ## Portable hard rules
 

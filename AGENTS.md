@@ -701,6 +701,7 @@ debugging-and-error-recovery    code-simplification          ci-cd-and-automatio
 |---|---|
 | Ветка | текущая `feat/*`; иначе `feat/<slug>` от `main` |
 | Milestone | `run-YYYY-MM-DD`, при коллизии `-2`, `-3`… |
+| Скоуп сессии | Явный пул задач («исправь #139–#142») = мини-loop в текущем milestone: WIP=1, цикл на пункт = fix → test → commit → close; ход не закрывается между пунктами пула |
 
 Tracker/labels — §13.9; reportDir/roles/surfaces — §13.1; commit/push и
 приоритеты — по loop.md, без проектных исключений.
@@ -716,7 +717,9 @@ Tracker/labels — §13.9; reportDir/roles/surfaces — §13.1; commit/push и
 
 Проект добавляет только: baseline/focused-команды §10, security-пункты §10 в
 Report, `reportDir` из §13.1 и tracker-поля §13.9. Текст стадий и шаблон Report
-здесь не дублируются.
+здесь не дублируются. В финальном Report каждый незакрытый пункт скоупа сессии
+обязан быть либо issue, либо строкой в `Next` со статусом — «висячих» хвостов
+без статуса не остаётся.
 
 Номера §13.3–§13.8 удалены: профили, стадии, Report и расширение живут в
 `.omp/skills/agent-profiles/`.
