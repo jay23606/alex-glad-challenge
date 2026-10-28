@@ -4,6 +4,7 @@ import type { ComponentType } from 'react';
 import {
   IconCpu,
   IconDatabase,
+  IconList,
   IconMessages,
   IconPlug,
   IconRss,
@@ -31,6 +32,11 @@ export const navGroups: Array<{
       { href: '/dashboard', label: 'Dashboard' },
       { href: '/showcase', label: 'Витрина' },
     ],
+  },
+  {
+    tag: 'course',
+    icon: IconList,
+    items: [{ href: '/course', label: 'Курс I2N #8' }],
   },
   {
     tag: 'rag',
@@ -69,6 +75,7 @@ export const navGroups: Array<{
     items: [
       { href: '/blog/news', label: 'новости' },
       { href: '/blog/posts', label: 'посты' },
+      { href: '/blog/settings', label: 'настройки' },
       { href: '/blog/digest', label: 'дайджест' },
       { href: '/blog/pipeline', label: 'pipeline' },
       { href: '/blog/scout', label: 'scout' },

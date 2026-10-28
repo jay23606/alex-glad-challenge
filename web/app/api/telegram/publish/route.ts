@@ -59,8 +59,9 @@ export async function POST(req: NextRequest): Promise<Response> {
       getNotificationDb().add({
         type: 'post_published',
         title: 'Пост опубликован',
-        // Тело уведомления — чистый текст: composer присылает TG-HTML, сырую
-        // разметку в /notifications не показываем (кап 160).
+        // Тело уведомления — видимый текст с учётом эффективного parse mode:
+        // composer присылает TG-HTML (литеральные уголки не вырезаются),
+        // при parseMode 'none' текст уже литеральный (кап 160).
         body: tgVisibleText(parsed.data.text, parsed.data.parseMode ?? 'HTML').slice(0, 160),
         href: '/telegram/history',
       });

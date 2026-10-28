@@ -25,6 +25,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,6 +40,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -114,15 +116,26 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
             )
             Spacer(Modifier.height(10.dp))
             var showToken by remember { mutableStateOf(false) }
+            // Раскрытый токен автоматически скрывается через 20 с (#124).
+            LaunchedEffect(showToken) {
+                if (showToken) {
+                    delay(20_000)
+                    showToken = false
+                }
+            }
             Text(
-                "API-токен",
+                "Сессия",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val token = credentials?.token ?: ""
                 Text(
-                    if (showToken) token else token.take(4) + "•".repeat((token.length - 4).coerceAtLeast(4)),
+                    when {
+                        credentials == null -> "—"
+                        showToken -> token
+                        else -> "•".repeat(8)
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.weight(1f),
@@ -171,7 +184,7 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
             Text("  Выйти и очистить доступ", style = MaterialTheme.typography.labelLarge)
         }
         Text(
-            "Токен удаляется с устройства; адрес сервера запомнится для повторного входа.",
+            "Сессия удаляется с устройства; адрес сервера запомнится для повторного входа.",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 24.dp),

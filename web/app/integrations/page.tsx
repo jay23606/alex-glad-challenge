@@ -6,7 +6,7 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { SectionHead } from '../components/ui/SectionHead';
 import { EmptyState } from '../components/ui/EmptyState';
-import { INPUT_CLASS } from '../components/ui/Field';
+import { Field, INPUT_CLASS } from '../components/ui/Field';
 
 // Форма «Входящие webhooks» — стековый блок (space-y-2): INPUT_CLASS
 // блочность/ширину не задаёт, добавляем локально (глобально менять нельзя —
@@ -107,11 +107,17 @@ export default function IntegrationsPage() {
 
       <Card label="Новая подписка">
         <div className="space-y-2">
-          {/* name+URL — 2 колонки от sm, секрет — полная строка; на узких — стек (inputs инлайновые, без grid сжимаются в одну строку). */}
+          {/* name+URL — 2 колонки от sm, секрет — полная строка; на узких — стек (Field даёт label↔контрол; grid-логика в className Field'а). */}
           <div className="grid gap-2 sm:grid-cols-2">
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Название" className={INPUT_CLASS} />
-            <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/hook" className={INPUT_CLASS} />
-            <input value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="Секрет подписи (необязательно)" className={`${INPUT_CLASS} sm:col-span-2`} />
+            <Field id="hook-name" label="Название">
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Название" className={`block w-full ${INPUT_CLASS}`} />
+            </Field>
+            <Field id="hook-url" label="URL">
+              <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/hook" className={`block w-full ${INPUT_CLASS}`} />
+            </Field>
+            <Field id="hook-secret" label="Секрет подписи (необязательно)" className="sm:col-span-2">
+              <input value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="Секрет подписи (необязательно)" className={`block w-full ${INPUT_CLASS}`} />
+            </Field>
           </div>
           <div className="flex flex-wrap gap-2">
             {EVENTS.map((e) => (
@@ -151,11 +157,15 @@ export default function IntegrationsPage() {
             Внешний сервис шлёт POST на URL хука с заголовком x-artel-signature (HMAC-SHA256 тела секретом);
             событие превращается в уведомление или todo.
           </p>
-          <input value={inName} onChange={(e) => setInName(e.target.value)} placeholder="Название (например, CI)" className={INBOUND_FIELD_CLASS} />
-          <select value={inTarget} onChange={(e) => setInTarget(e.target.value as 'notification' | 'todo')} className={INBOUND_FIELD_CLASS}>
-            <option value="notification">уведомление</option>
-            <option value="todo">todo</option>
-          </select>
+          <Field id="inbound-name" label="Название (например, CI)">
+            <input value={inName} onChange={(e) => setInName(e.target.value)} placeholder="Название (например, CI)" className={INBOUND_FIELD_CLASS} />
+          </Field>
+          <Field id="inbound-target" label="Куда доставлять">
+            <select value={inTarget} onChange={(e) => setInTarget(e.target.value as 'notification' | 'todo')} className={INBOUND_FIELD_CLASS}>
+              <option value="notification">уведомление</option>
+              <option value="todo">todo</option>
+            </select>
+          </Field>
           <Button variant="primary" onClick={createInbound}>Создать хук</Button>
           {inError ? <p className="text-sm text-err">{inError}</p> : null}
           {inCreated ? (

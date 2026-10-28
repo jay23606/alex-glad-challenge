@@ -85,6 +85,10 @@ test('parseCommand: старые короткие имена остаются а
   assert.deepEqual(parseCommand('/improv севенс'), { name: 'изобрази', args: 'севенс' });
   assert.deepEqual(parseCommand('/asif севенс парковка'), { name: 'какбы', args: 'севенс парковка' });
   assert.deepEqual(parseCommand('/stat'), { name: 'стат', args: '' });
+  assert.deepEqual(parseCommand('/post nevsky-hram Рождество'), {
+    name: 'пост',
+    args: 'nevsky-hram Рождество',
+  });
   assert.deepEqual(parseCommand('/alias сёва Saveliy'), { name: 'алиас', args: 'сёва Saveliy' });
   assert.deepEqual(parseCommand('/reindex'), { name: 'reindex', args: '' });
 });
@@ -113,6 +117,7 @@ test('BOT_COMMANDS: фиксированный набор M1 + брендиро�
       'игра',
       'изобрази',
       'какбы',
+      'пост',
       'сказал',
       'стат',
       'уровень',

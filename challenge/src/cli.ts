@@ -35,6 +35,8 @@ import { seedStyleSamples } from './core/agents/seed.js';
 import { publishPost, isTelegramConfigured } from './core/agents/telegram.js';
 import { McpHttpClient } from './core/mcpHttpClient.js';
 import { parseTodoArgs } from './core/todoParser.js';
+import { CourseDb } from './core/courseDb.js';
+import { importCourseDir } from './core/courseImport.js';
 import { runAgentRequest } from './core/mcpAgentLoop.js';
 import { runAssistantServer } from './core/assistantMcp.js';
 import { indexDocsCorpus, askDevAssistant, CLOUD_DOWN_MESSAGE } from './core/rag/devAssistant.js';
@@ -119,6 +121,8 @@ function printHelp(): void {
   console.log('    --publish          опубликовать готовый пост в Telegram (только если verdict=ok)');
   console.log('  seed-style       Залить образцы стиля канала в БД (один раз)');
   console.log('  db-stats         Статистика БД: сколько новостей/постов/образцов');
+  console.log('  course-import <dir>  Импорт транскрипций курса (*.transcript.json) в course.sqlite');
+  console.log('    --meta <dir>       каталог курированных <slug>.json (по умолчанию — рядом с dir)');
   console.log('  rag index [path] Индексировать каталог документов в RAG-индекс (день 21, локальные эмбеддинги)');
   console.log('    --strategy <name>   только fixed | structure (по умолчанию обе)');
   console.log('  rag query "<q>"  Вопрос по индексу (день 22); нужен локальный LLM');
@@ -131,7 +135,7 @@ function printHelp(): void {
   console.log('  rag index-tg <chat> [<topicId>]  TG-топик → length-чанки (склейка сообщ.) → RAG strategy=telegram');
   console.log('    --top <N>           tier1: top-N чанков по реакциям (по умолч. 1500), чистит telegram');
   console.log('    --rest              tier2: доклеить хвост (остальные чанки), НЕ чистит индекс');
-  console.log('    --reset             полный reindex: чистит telegram и индексирует все чанки');
+  console.log('    --reset             полный reindex: пересобирает чанки RAG-индекса');
   console.log('    --limit <N>         ограничить collect (только smoke; на chunk-build не влияет)');
   console.log('  rag index-tg <chat>              ВЕСЬ чат: forum=все топики (GetForumTopics),');
   console.log('                                       не-forum=основной поток (topic_id=0). Только с --reset');
@@ -139,7 +143,8 @@ function printHelp(): void {
   console.log('    --probe             dry-run: проверить чтение топика (5 сообщ.), без записи');
   console.log('    --limit <N>         ограничить число сообщений (для --probe / smoke)');
   console.log('    --resume            продолжить прерванный сбор с курсора');
-  console.log('    --reset             очистить топик и собрать заново (полный re-fetch)');
+  console.log('    --reset             полный re-fetch: сброс курсора, сборка с нуля чата;');
+  console.log('                        уже скачанные сообщения НЕ удаляются (upsert-дедуп)');
   console.log('  tg-top <chat> [<topicId>]  Топ сообщений по реакциям/дате (SQL над tg.sqlite, без сети)');
   console.log('    --by likes|date     сортировка (по умолч. likes)');
   console.log('    --limit <N>         сколько строк (по умолч. 20)');
@@ -480,6 +485,11 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (arg === 'course-import') {
+    runCourseImportCommand(argv.slice(1));
+    return;
+  }
+
   if (arg === 'ask') {
     const question = argv.slice(1).join(' ').trim();
     if (!question) {
@@ -709,7 +719,7 @@ async function main(): Promise<void> {
 
   console.error(`Неизвестная команда "${arg}".`);
   console.error('Доступные дни: ' + demos.map((d) => d.id).join(', '));
-  console.error('Команды: chat, list, latest, news, seed-style, db-stats, rag, tg-collect, tg-top, tg-bot, maxim-bot, mcp-server, scheduler, day-20-server, day-20, todo, remind, todos, done, summary, mcp, mcp-tools, ask, support, support-seed, crm-server, file-server, files, help');
+  console.error('Команды: chat, list, latest, news, seed-style, db-stats, course-import, rag, tg-collect, tg-top, tg-bot, maxim-bot, mcp-server, scheduler, day-20-server, day-20, todo, remind, todos, done, summary, mcp, mcp-tools, ask, support, support-seed, crm-server, file-server, files, help');
   process.exit(1);
 }
 
@@ -746,6 +756,7 @@ async function runNewsCommand(argv: string[]): Promise<void> {
       topK: flags.top,
       writeForIndex: flags.forIndex,
       profile,
+      log: console.log,
     });
 
     console.log('\n=== Топ-новости (агент 1) ===');
@@ -821,6 +832,40 @@ function runDbStatsCommand(): void {
     console.log(`news:           ${db.newsCount()}`);
     console.log(`posts:          ${db.postsCount()}`);
     console.log(`style_samples:  ${db.styleSamplesCount()}`);
+  } finally {
+    db.close();
+  }
+}
+
+// --- Course: импорт транскрипций лекций курса (web /course + Android «Артель») ---
+
+function runCourseImportCommand(args: string[]): void {
+  let dir: string | null = null;
+  let metaDir: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--meta' && args[i + 1]) {
+      metaDir = args[++i];
+      continue;
+    }
+    if (!dir && !args[i].startsWith('-')) dir = args[i];
+  }
+  if (!dir) {
+    console.error('Укажите каталог с *.transcript.json:');
+    console.error('  pnpm --filter challenge start -- course-import <dir> [--meta <dir>]');
+    process.exit(1);
+  }
+  const db = new CourseDb(dataPath('course.sqlite'));
+  try {
+    const results = importCourseDir(db, dir, metaDir);
+    if (results.length === 0) {
+      console.log('Не найдено *.transcript.json с распознаваемым именем («N неделя …» / «…вступление…»).');
+      return;
+    }
+    console.log(`Импортировано уроков: ${results.length}`);
+    for (const r of results) {
+      const flag = r.curated ? '★ курировано' : '  без метаданных';
+      console.log(`  ${r.slug.padEnd(8)} ${r.sections} секц. ${String(r.excerpts).padStart(2)} выдерж.  ${flag}  ${r.title}`);
+    }
   } finally {
     db.close();
   }
@@ -1326,7 +1371,7 @@ async function runFilesDocsCommand(goal: string, write: boolean): Promise<void> 
 async function runFilesRefactorCommand(goal: string, write: boolean): Promise<void> {
   console.log(`▶ files refactor (${write ? 'write' : 'dry-run'}): ${goal}\n`);
   try {
-    const res = await runRefactor(goal, { write });
+    const res = await runRefactor(goal, { write, log: console.log });
     console.log(`target: ${res.targetPath}`);
     if (res.cloudStatus !== 'ok') {
       console.log(CLOUD_DOWN_MESSAGE);
@@ -1354,7 +1399,7 @@ async function runFilesRefactorCommand(goal: string, write: boolean): Promise<vo
 async function runFilesScaffoldCommand(goal: string, write: boolean): Promise<void> {
   console.log(`▶ files scaffold (${write ? 'write' : 'dry-run'}): ${goal}\n`);
   try {
-    const res = await runScaffold(goal, { write });
+    const res = await runScaffold(goal, { write, log: console.log });
     console.log(`target: ${res.targetPath}`);
     if (res.cloudStatus !== 'ok') {
       console.log(CLOUD_DOWN_MESSAGE);
@@ -1560,7 +1605,7 @@ async function runRagCommand(argv: string[]): Promise<void> {
       const store = new RagStore(RAG_DB_PATH);
       try {
         console.log(`▶ RAG index: ${docsDir} → ${RAG_DB_PATH}`);
-        const result = await runIndexing(store, { docsDir, strategies });
+        const result = await runIndexing(store, { docsDir, strategies, onLog: console.log });
         for (const s of Object.keys(result)) {
           const st = result[s];
           console.log(`  ${s}: ${st.chunks} чанков, среднее ${st.avgLen} симв, dim=${st.dim ?? '-'}`);

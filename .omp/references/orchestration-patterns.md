@@ -1,6 +1,11 @@
 # Orchestration Patterns
 
-Reference catalog of agent orchestration patterns this repo endorses, plus anti-patterns to avoid. Read this before adding a new slash command that coordinates multiple personas, or before introducing a new persona that "wraps" existing ones.
+> **Harness-neutral reference.** Slash-command and plugin examples (`/ship`,
+> `/review`, `.claude-plugin/plugin.json`) are illustrative and apply only if your
+> harness provides them. This pack ships no commands or plugin. Canonical personas
+> are in `../agents/`; skills are in `../skills/`.
+
+Reference catalog of agent orchestration patterns this pack endorses, plus anti-patterns to avoid. Read this before adding a new slash command that coordinates multiple personas, or before introducing a new persona that "wraps" existing ones.
 
 The governing rule: **the user (or a slash command) is the orchestrator. Personas do not invoke other personas.** Skills are mandatory hops inside a persona's workflow.
 
@@ -37,7 +42,7 @@ A slash command that wraps one persona with the project's skills. Saves the user
 
 **Use when:** the same single-persona invocation happens repeatedly with the same setup.
 
-**Examples in this repo:** `/review`, `/test`, `/code-simplify`.
+**Examples in this pack:** `/review`, `/test`, `/code-simplify`.
 
 **Cost:** same as direct invocation. The slash command is just a saved prompt.
 
@@ -61,7 +66,7 @@ Multiple personas operate on the same input concurrently, each producing an inde
 - The merge step is small enough to stay in the main context
 - Wall-clock latency matters
 
-**Examples in this repo:** `/ship`.
+**Examples in this pack:** `/ship`.
 
 **Cost:** N parallel sub-agent contexts + one merge turn. Higher than direct invocation, but faster wall-clock and produces better reports because each sub-agent stays focused on its single perspective.
 
@@ -85,7 +90,7 @@ user runs:  /spec  →  /plan  →  /build  →  /test  →  /review  →  /ship
 
 **Use when:** the workflow has dependencies (each step needs the previous step's output) and human judgment between steps adds value.
 
-**Examples in this repo:** the entire DEFINE → PLAN → BUILD → VERIFY → REVIEW → SHIP lifecycle.
+**Examples in this pack:** the entire DEFINE → PLAN → BUILD → VERIFY → REVIEW → SHIP lifecycle.
 
 **Cost:** one sub-agent context per step. Free for the orchestration layer because there is no orchestrator agent.
 
@@ -120,7 +125,7 @@ This catalog is harness-agnostic, but most readers will run it on Claude Code. H
 
 ### Where personas live
 
-Plugin subagents go in `agents/` at the plugin root. This repo is a plugin (`.claude-plugin/plugin.json`), so `agents/code-reviewer.md`, `agents/security-auditor.md`, and `agents/test-engineer.md` are auto-discovered when the plugin is enabled. No path configuration needed.
+Plugin subagents (if the harness supports plugins) go in `agents/` at the plugin root; otherwise load the persona files in `../agents/` directly. No path configuration is needed when the harness auto-discovers them.
 
 ### Subagents vs. Agent Teams
 
@@ -134,7 +139,7 @@ Claude Code has two parallelism primitives. Pattern 3 (parallel fan-out with mer
 | Status | Stable | Experimental — requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` |
 | Cost | Lower | Higher — each teammate is a separate Claude instance |
 
-**The personas in this repo work in both modes.** When spawned as subagents (e.g. by `/ship`), they report findings to the main session. When spawned as teammates (`Spawn a teammate using the security-auditor agent type…`), they can challenge each other's findings directly. The persona definition is the same; only the spawning context changes.
+**The personas in this pack work in both modes.** When spawned as subagents (e.g. by `/ship`), they report findings to the main session. When spawned as teammates (`Spawn a teammate using the security-auditor agent type…`), they can challenge each other's findings directly. The persona definition is the same; only the spawning context changes.
 
 One subtlety: the `skills` and `mcpServers` frontmatter fields in a persona are honored when it runs as a subagent but **ignored when it runs as a teammate** — teammates load skills and MCP servers from your project and user settings, the same as a regular session. If a persona depends on a specific skill or MCP server being loaded, configure it at the session level so it's available in both modes.
 
@@ -212,7 +217,7 @@ Agent Teams is experimental. In `~/.claude/settings.json`:
 }
 ```
 
-Requires Claude Code v2.1.32 or later. The personas in this repo are picked up automatically — no team-config files to author by hand.
+Requires Claude Code v2.1.32 or later. The personas in this pack are picked up automatically — no team-config files to author by hand.
 
 ### The trigger prompt
 
@@ -363,7 +368,7 @@ Is the work one perspective on one artifact?
 Add a new entry only after:
 
 1. You've used the pattern at least twice in real work
-2. You can name a concrete artifact in this repo that demonstrates it
+2. You can name a concrete artifact in the codebase that demonstrates it
 3. You can explain why an existing pattern wouldn't have worked
 4. You can describe its anti-pattern shadow (what people will mistakenly build instead)
 

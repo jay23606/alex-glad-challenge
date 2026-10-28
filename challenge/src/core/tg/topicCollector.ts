@@ -426,7 +426,8 @@ function floodWaitSeconds(err: unknown): number | null {
 
 /**
  * Собрать сообщения forum-топика в tg.sqlite. Режимы (по моей инструкции — incremental default):
- *  - reset: clearTopic + clearState → полный backward-sweep (новые→старые).
+ *  - reset: сброс курсора (clearState) → полный backward-sweep; СООБЩЕНИЯ НЕ УДАЛЯЮТСЯ
+ *           (upsert идемпотентен, повторный проход обновит текст/реакции на месте).
  *  - resume: продолжить прерванный backward-sweep с offsetId=state.min_msg_id.
  *  - default: если state.completed=1 → incremental (id > state.max_msg_id, reverse:true);
  *             иначе полный backward-sweep (первый запуск или прерванный).
@@ -442,9 +443,13 @@ export async function collectTopic(
   const limit = opts.limit;
   const prev = store.getCollectState(ref.chatKey, ref.topicId);
 
+  // --reset больше НЕ удаляет сообщения: upsert идемпотентен (PK + ON CONFLICT
+  // обновит текст/реакции), а стирание истории — необратимая потеря данных
+  // (инцидент 2026-10-05: --reset снёс 950к сообщений, сборка упала на
+  // «database is locked», база осталась с 20к хвостом). Reset = только сброс
+  // курсора → полный backward-sweep поверх того, что уже в базе.
   let mode: 'full' | 'resume' | 'incremental';
   if (opts.reset) {
-    store.clearTopic(ref.chatKey, ref.topicId);
     store.clearState(ref.chatKey, ref.topicId);
     mode = 'full';
   } else if (opts.resume) {

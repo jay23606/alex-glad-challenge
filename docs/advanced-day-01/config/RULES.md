@@ -1,5 +1,8 @@
 # Hard rules (sticky)
 
+> **Historical (ADVANCED Day 1).** Superseded by `.omp/RULES.md` and `AGENTS.md`.
+> Do not follow this copy.
+
 - Read `AGENTS.md` before changing code. Project rules win over global rules.
 - Never hardcode or log secrets, API keys, `TG_SESSION`, bearer tokens, URLs with
   credentials, or absolute local paths.

@@ -86,6 +86,9 @@ export class TgStore {
     mkdirSync(path.dirname(dbPath), { recursive: true });
     this.db = new DatabaseSync(dbPath);
     this.db.exec('PRAGMA journal_mode = WAL');
+    // Ждём освобождения блокировки, а не падаем «database is locked»: параллельно
+    // с collect может работать tg-bot (и наоборот) — тот же файл.
+    this.db.exec('PRAGMA busy_timeout = 30000');
     this.db.exec(SCHEMA);
     this.upsertStmt = this.db.prepare(
       `INSERT INTO tg_messages

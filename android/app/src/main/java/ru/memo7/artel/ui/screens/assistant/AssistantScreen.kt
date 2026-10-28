@@ -63,6 +63,9 @@ data class AssistantUiState(
     val busy: Boolean = false,
 )
 
+/** Клиентский предел вопроса — как на сервере (assistantSchema.message.max(2000)). */
+private const val MAX_INPUT_LENGTH = 2000
+
 class AssistantViewModel(private val repository: ArtelRepository) : ViewModel() {
 
     private val _state = MutableStateFlow(AssistantUiState())
@@ -72,7 +75,8 @@ class AssistantViewModel(private val repository: ArtelRepository) : ViewModel() 
 
     fun send(text: String) {
         val trimmed = text.trim()
-        if (trimmed.isEmpty() || _state.value.busy) return
+        // Лимит сервера: assistantSchema.message.max(2000) в web/lib/shared/forms.ts.
+        if (trimmed.isEmpty() || trimmed.length > MAX_INPUT_LENGTH || _state.value.busy) return
         val userMessage = ChatMessage(id = nextId++, fromUser = true, text = trimmed)
         val pending = ChatMessage(id = nextId++, fromUser = false, text = "Думаю…", pending = true)
         _state.update { it.copy(messages = it.messages + userMessage + pending, busy = true) }
@@ -142,18 +146,29 @@ fun AssistantScreen(container: AppContainer) {
         ) {
             OutlinedTextField(
                 value = input,
-                onValueChange = { input = it },
+                onValueChange = { input = it.take(MAX_INPUT_LENGTH) },
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("Ваш вопрос…") },
                 shape = ArtelShapes.pill,
                 maxLines = 4,
+                supportingText = {
+                    Text(
+                        "${input.length} / $MAX_INPUT_LENGTH",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (input.length >= MAX_INPUT_LENGTH) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                },
             )
             IconButton(
                 onClick = {
                     vm.send(input)
                     input = ""
                 },
-                enabled = !state.busy && input.isNotBlank(),
+                enabled = !state.busy && input.isNotBlank() && input.length <= MAX_INPUT_LENGTH,
             ) {
                 Icon(
                     Icons.AutoMirrored.Rounded.Send,

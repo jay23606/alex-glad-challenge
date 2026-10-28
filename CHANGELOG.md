@@ -832,11 +832,13 @@ DeepSeek; если за 2 минуты нет ответа — капсит и �
 - `core/tg/maximBot.ts` (новый) — самодостаточный бот на `BotApiClient`:
   long polling (тот же chokepoint netFetch), backoff ×2 до 30 с, выход по
   409 Conflict, graceful shutdown с persist состояния.
-- Расписание: обычный день — одно напутствие раз в N дней (по умолч. 3,
-  `MAXIM_NORMAL_INTERVAL_DAYS`) в случайный момент окна 10:00–20:00 (локаль);
-  hot-окно (день релиза + следующий) — каждые 60–180 мин.
-  Релизный календарь — эпоха + период (по умолч. 2026-10-06, 14 дней:
-  релизы 41, 43, …), всё переопределяется env.
+- Расписание: одно напутствие в день релиза (релизный календарь — эпоха +
+  период, по умолч. 2026-10-06 + 14 дней: релизы 41, 43, …) в случайный
+  момент окна 10:00–20:00 (локаль), всё переопределяется env.
+  **Изменение 2026-10-09:** напутствия — только в день релиза, одно за день
+  (раньше — hot-окно «день релиза + следующий» каждые 60–180 мин плюс одно
+  напутствие раз в 3 дня в обычные дни); капс-эскалация и диалоги по
+  обращению сохранены.
 - Генерация фраз: `LlmClient` с конфигом `getMaximLlmConfig()` — ИМЕННО DeepSeek:
   напрямую 'deepseek-chat' (DEEPSEEK_API_KEY) или через OpenRouter
   ('deepseek/deepseek-chat-v3.1', override — MAXIM_MODEL); температура из
@@ -1528,3 +1530,373 @@ closed 0, asked-user 1, метрика неполная до commit.
 `web/lib/server/style-prompt.ts`, `web/app/dashboard/page.tsx`,
 `web/test/unit/*`, `web/e2e/antonov.spec.ts`,
 `docs/auantonov-rewrite-prompt.md`.
+
+## Execution loop: Android ↔ web parity + UX-фиксы (2026-10-25)
+**Дата:** 2026-10-25. Профиль «Бизнес-фича» + bugfix (AGENTS §13.3–§13.4).
+**Milestone:** `run-2026-10-25-android`; epic #111.
+**Issues:** #105–#109, #112–#117, #120–#122, #124–#128.
+
+**Что сделано:**
+- Android core flow: `PATCH /api/workspace/items/{id}` вместо коллекции (был 405),
+  refresh списка после toggle, per-item in-flight guard, ошибки — в snackbar;
+  cancellation больше не маскируется под сетевую ошибку в `ArtelRepository`.
+- Automation: nullable `blogSlug`, `stylePreset` (`default|antonov`) через
+  `PATCH /api/blogs/{slug}` с mobile Bearer, пресеты интервала до 1440 мин,
+  сохранение исходного значения, `SnackbarHost`/`Channel`.
+- Новые экраны: «Геймификация» (XP-журнал + достижения, вход с дашборда) и
+  «Задачи» (список, повтор, complete/dismiss/delete).
+- Календарь: локальный refresh отделён от Google sync, sync заблокирован без
+  Google, `.ics`-экспорт через FileProvider/share sheet, русские подписи
+  источников, prune старых файлов, ошибки share.
+- Уведомления: SQLite-даты как UTC → локальное время, корректные типы,
+  `markRead(id)` и безопасный http(s)-`href`.
+- Android UX: 401 на Connect, отдельная ошибка FAQ, лимит 2000 у ассистента;
+  полная маска токена с авто-скрытием через 20 с; сброс формы поддержки.
+- Дизайн: AA-контраст achievement-карточек (inverted pills, полная
+  непрозрачность), icon-only bottom nav на 320dp/fs1.3, полный accent-заголовок,
+  русская плюрализация счётчиков, системные бары по теме приложения (включая
+  API 26–28).
+- Web: `tgVisibleText` для уведомления/превью/истории (литеральные `< >` и
+  `parseMode:none`), Field-label на `/integrations`, header без overflow
+  640–1024px, тесты DELETE-границ и дефолтного publish-пути.
+
+**Проверки:** `pnpm --filter challenge typecheck` + 239 tests; `pnpm --filter
+web typecheck` + 482 tests; `pnpm --filter web build` — 48 страниц; Android
+`:app:assembleDebug :app:testDebugUnitTest` — 40 tests / 12 классов;
+Playwright `header.spec.ts` 9/9, `composer.spec.ts` — 14 passed/1 pre-existing
+skip; E2E в эмуляторе Android: connect, dashboard, gamification, todos,
+projects + toggle, automation style/1440, calendar refresh/.ics, notifications,
+support, settings, dark/light и 320dp/fs1.3. Скриншоты — `.shots/android/`.
+
+**Риски/ограничения:** web-only admin/dev-поверхности (RAG, blog, TG, MCP,
+integrations, server settings) намеренно не переносились на Android; E2E шёл
+против локального dev-сервера и локальной SQLite, production-сборка web
+проверена build'ом, production Android-подпись/Play Store не затрагивались;
+E2E-данные после прогона вычищены: проект «Android E2E» и задачи удалены,
+токен с эмулятора стёрт. Остались только выключенное правило автоматизации
+блога 1 (API не удаляет правила) и тестовое обращение поддержки в
+`challenge/.data`.
+
+**Код:** `android/**`, `web/lib/shared/tg-html.ts`,
+`web/app/api/telegram/publish/route.ts`, `web/app/telegram/publish/TgComposer.tsx`,
+`web/app/blog/posts/[id]/page.tsx`, `web/app/integrations/page.tsx`,
+`web/app/components/Nav.tsx`, `web/app/api/blogs/[slug]/route.ts`,
+`web/test/**`, `challenge/src/core/agents/automationRun.test.ts`.
+
+## Android: вход по паролю вместо URL/API-токена (2026-10-25)
+**Дата:** 2026-10-25. Профиль «Бизнес-фича».
+
+**Что сделано:**
+- `POST /api/mobile/login`: пароль рабочего пространства
+  (`WEB_ADMIN_PASSWORD`) → stateless session-токен (тот же `createSessionValue()`,
+  HMAC, TTL 7 дней); cookie не выдаётся. Rate-limit общий с `/api/auth/login`
+  (10 неудач / 15 мин, `Retry-After: 900`), 503 при незаданном auth-env.
+- `isMobileAuthed` принимает session-токен как `Authorization: Bearer` наравне
+  со статическим `MOBILE_API_TOKEN` (остаётся для автоматизации). Входной
+  endpoint добавлен в `PUBLIC_PATHS`; остальные `/api/*` по-прежнему закрыты.
+- Android: адрес сервера зашивается при сборке
+  (`-Partel.serverUrl=...`, в APK не коммитится); первый экран — только
+  «Пароль» + «Войти», без «Адрес сервера»/«API-токен». Токен сохраняется
+  в DataStore только после успешного `bootstrap`; 401 очищает сессию и
+  возвращает на вход. Версия 1.0.1 (versionCode 2).
+- Android: после успешного входа состояние `ConnectViewModel` сбрасывается —
+  иначе после logout/401 экран входа оставался с busy-спиннером и старым
+  паролем (P1, найден ревью и подтверждён на эмуляторе). 401 теперь чистит
+  токен только если он всё ещё тот, которым шёл запрос (`clearTokenIf`), —
+  поздний ответ старого запроса не разлогинивает после повторного входа.
+- Docs: контракт в `docs/api-contracts.md`, `docs/AUTHORIZATION.md`
+  (мобильный Bearer, границы `requireAuth`, отсутствие отзыва),
+  пояснение в `.env.example`, обновлённый `android/README.md`.
+
+**Проверки:** `pnpm --filter web typecheck` — чисто; `pnpm --filter web exec
+vitest run --maxWorkers=2` — 516/516 (+23 теста: Bearer-middleware, TTL/подмена
+exp, частичный env, общий rate-limit, cookie-вход); `pnpm --filter challenge
+typecheck` — чисто; Android `:app:testDebugUnitTest :app:assembleDebug` —
+успешно; эмулятор: неверный пароль → сообщение 401, верный пароль → дашборд
+с реальными данными, logout в том же процессе → чистый экран входа с активной
+кнопкой, повторный вход работает; финальный APK с Tailscale-адресом проверен
+на эмуляторе против dev-сервера, поднятого на tailnet-интерфейсе.
+
+**Риски/ограничения:** сборка debug, HTTP только внутри tailnet; production
+требует HTTPS и release-подписи. Сервер должен быть запущен и доступен с
+телефона по Tailscale; вне tailnet приложение не подключится. Пароль — общий
+админский, на устройстве не хранится; сессия живёт 7 дней, затем вход
+повторяется. Публичный доступ «любому установившему» потребовал бы отдельного
+демо-режима/ролей и намеренно не открыт.
+
+**Код:** `web/app/api/mobile/login/route.ts`,
+`web/lib/server/loginRateLimit.ts`, `web/lib/auth.ts`, `web/middleware.ts`,
+`web/app/api/auth/login/route.ts`, `web/test/unit/mobile-*.spec.ts`,
+`web/test/unit/auth-login-route.spec.ts`,
+`web/test/unit/login-rate-limit.spec.ts`, `docs/AUTHORIZATION.md`,
+`android/app/build.gradle.kts`,
+`android/app/src/main/java/ru/memo7/artel/ui/screens/connect/ConnectScreen.kt`,
+`android/.../data/api/AuthApi.kt`, `android/.../core/network/ApiFactory.kt`,
+`android/.../data/CredentialsStore.kt`, `android/.../data/ArtelRepository.kt`,
+`android/app/src/test/java/ru/memo7/artel/data/NormalizeBaseUrlTest.kt`,
+`android/app/src/test/java/ru/memo7/artel/data/api/AuthApiContractTest.kt`,
+`android/README.md`.
+
+## Android: runbook диагностики недоступности сервера (2026-10-26)
+**Дата:** 2026-10-26. Профиль «Поиск бага» (loop-run).
+
+**Контекст:** инцидент входа Артель: корректный пароль, на экране входа
+«Сервер недоступен: failed to connect to /100.66.133.56 (port 3000)
+from /192.168.31.134 (port 41378) after 15000ms». Диагноз: отказ
+TCP-подключения до HTTP-фазы — проблема connectivity, не аутентификации.
+
+**Причины (стек):**
+- В момент ошибки телефон шёл мимо VPN: источник сокета в ошибке —
+  `192.168.31.134` (Wi-Fi/LAN), а не tailnet-адрес `100.68.6.26`; серверная
+  Tailscale-панель показывала телефон `offline, last seen 2h ago`. Пакеты к
+  `100.66.133.56` (CGNAT 100.64/10) уходили в домашний шлюз и терялись →
+  `SocketTimeoutException` на 15s `connectTimeout` (`ApiFactory`).
+- Штатные web-скрипты bind'ят сервер только на `127.0.0.1` (`-H` в
+  `web/package.json`), т.е. при штатном запуске сервер не виден по tailnet;
+  приёмка Android-фичи 2026-10-25 использовала ручной запуск
+  `next dev -H <tailscale-ip>`, который ни один скрипт репо не воспроизводит.
+- На момент диагностики на `:3000` не слушал никто (сервер не запущен).
+
+**Сделано:** `android/README.md` — чеклист «Сервер недоступен: failed to
+connect … after 15000ms»: сервер запущен → bind на доступный телефону адрес
+(Tailscale-IP или `tailscale serve`) → VPN на телефоне (адрес источника из
+`from /<ip>` в ошибке) → firewall → cleartext в release. Код не менялся;
+`dev`/`start` с `-H 127.0.0.1` сохранены по правилу loopback-bind.
+
+**Проверки:** сервер поднят `pnpm --filter web exec next dev -H
+100.66.133.56`; `Test-NetConnection 100.66.133.56 -Port 3000` — True
+(до фикса False); `GET /` → 200; `POST /api/mobile/login` с `{}` → 400
+`{"ok":false,"error":"Required"}`. С телефона не проверялось: телефон
+offline в tailnet на момент диагностики — осталось включить Tailscale на
+телефоне. Firewall-правило для порта 3000 автоматически не добавлено
+(нужны права администратора): node.exe уже разрешён inbound (Private/
+Public), интерфейс Tailscale = Private.
+
+**Риски:** dev-режим на tailnet-IP — персональная деплой-модель Артель
+(HTTP внутри tailnet + парольный вход); без VPN с телефона сервер
+недоступен по определению. IP сервера не коммитится: в docs только
+плейсхолдер. Для release/GPS-вне-tailnet — HTTPS за reverse-proxy
+(`tailscale serve` как минимальный вариант).
+
+**Код:** `android/README.md`, `CHANGELOG.md` (docs-only).
+
+## Блоги: шпаргалка по управлению на сайте и в Android (2026-10-26)
+**Дата:** 2026-10-26. Профиль «Бизнес-фича». Запрос пользователя: короткая
+памятка на самой странице управления, читаемая с телефона на сайте и в
+приложении, вместо отдельного MD-файла.
+
+**Что сделано:**
+- Страница `/blog/settings` переименована в «Управление блогами» и получила
+  карточку «шпаргалка · как пользоваться»: 5 шагов (выбор блога, промпты,
+  разовый пост, расписание, проверка результата), предупреждение о безопасном
+  режиме черновиков и раскрываемый блок с Telegram-командой
+  `/пост <блог> [publish] <тема> [| комментарий]` и частыми вопросами.
+- `/blog/settings` добавлена в группу «блог» боковой/мобильной навигации —
+  раньше страница была доступна только из empty-state «Постов».
+- Android: в `AutomationScreen` первым элементом списка добавлена свёрнутая
+  карточка «Шпаргалка» с теми же 5 шагами под возможности приложения и кнопкой
+  «Открыть веб-настройки» (сохранённый base URL + `/blog/settings`); при пустом
+  списке правил карточка остаётся видимой.
+- Удалённого управления в Android нет намеренно: промпты и расписание живут на
+  сайте, приложение только ведёт к ним и объясняет публикацию/запуск.
+
+**Проверки:** `pnpm --filter web typecheck` — чисто; focused
+`blog-cheatsheet.spec.tsx` — 2/2; полный web Vitest — 536/536 (69 файлов);
+`pnpm --filter web build` — 49 страниц, `/blog/settings` в маршрутах;
+Playwright-smoke на viewport 390×844 (вход, страница, раскрытие FAQ, команда) —
+1 passed; Android `BlogHelpTest` (4 теста: шаги, команда, URL, пустой base URL)
+и полный `:app:testDebugUnitTest` — 50/50, `compileDebugKotlin` без новых
+предупреждений; challenge typecheck + 268/268 (без изменений в core).
+
+**Риски/ограничения:** шпаргалка — статический текст; при смене TG-синтаксиса
+или шагов её нужно править синхронно в `BlogCheatSheet.tsx` и
+`AutomationScreen.kt`. Android-ссылка открывает браузер и требует доступного
+с телефона сервера (та же tailnet-модель, что у входа). Полный web-прогон,
+запущенный параллельно с Gradle/build, один раз упал на таймаутах воркеров;
+последовательный прогон с `--maxWorkers=2` — 536/536.
+
+**Код:** `web/app/blog/settings/{page.tsx,BlogCheatSheet.tsx}`,
+`web/data/nav.ts`, `web/test/ui/blog-cheatsheet.spec.tsx`,
+`web/e2e/blog.spec.ts`,
+`android/app/src/main/java/ru/memo7/artel/ui/screens/automation/AutomationScreen.kt`,
+`android/app/src/test/java/ru/memo7/artel/ui/screens/automation/BlogHelpTest.kt`.
+
+---
+
+## Feature: курс I2N #8 — импорт транскрипций в web и Android (2026-10-26)
+**Дата:** 2026-10-26. Профиль: `business-feature`.
+
+**Задание:** импортировать 6 видео I2N Challenge #8 (вступление + недели 1–5)
+в проект, чтобы смотреть уроки в web (`/course`) и Android («Артель»), в двух
+уровнях контента: очищенная транскрипция с таймкодами и курированные выдержки
+с пояснениями (что/зачем/какую боль закрывает).
+
+**Сделано:**
+- Core: `CourseDb` (таблицы `lessons`/`sections`/`excerpts`, транзакционный
+  `upsertLesson`) и `courseImport` (slug из имени файла, парсинг
+  `*.transcript.json`, группировка utterance'ов в секции ~180с с оверлапом и
+  склейкой коротких хвостов, метаданные из `challenge/src/data/course/<slug>.json`).
+- CLI: `course-import <dir> [--meta <dir>]`; база `challenge/.data/course.sqlite`
+  засеяна 6 уроками с выдержками.
+- Web: server-компоненты `/course` и `/course/[slug]` (через `getCourseDb` +
+  `withDb`), навигационная группа `course`, GET-роуты
+  `/api/course/lessons[/{slug}]` под админ-gate (cookie/Bearer).
+- Android: DTO + `@GET api/course/lessons[/{slug}]`, кэш списка в
+  `ArtelRepository`, экраны `CourseScreen` (карточки уроков) и
+  `CourseDetailScreen` (зачем/боль + выдержки + транскрипция с таймкодами),
+  роуты `course`/`course/{slug}`, тайл «Курс» на дашборде.
+
+**Проверки:** challenge typecheck + 280/280 (12 — course-тесты); web typecheck +
+Vitest 541/541 (включая `course-lessons-route.spec.ts` 5/5); `pnpm --filter web
+build` — `/course` и `/api/course` в маршрутах; Android `compileDebugKotlin` и
+`assembleDebug` — без ошибок (JDK 21 из `artel-tools`).
+
+**Риски/ограничения:** страницы курса и API закрыты middleware (админ-cookie или
+Bearer-токен) — анонимный просмотр недоступен; выдержки — статические JSON в
+репозитории, при новом видео их нужно добавить вручную; Android не кэширует
+деталь урока офлайн (список — в памяти, детали — всегда по сети).
+
+**Код:** `challenge/src/core/courseDb.ts`, `challenge/src/core/courseImport.ts`,
+`challenge/src/data/course/*.json`, `challenge/src/cli.ts`,
+`web/app/course/`, `web/app/api/course/`, `web/data/nav.ts`,
+`web/lib/server/{db,challenge}.ts`,
+`android/.../ui/screens/course/`, `android/.../data/api/{ApiModels,ArtelApi}.kt`,
+`android/.../data/ArtelRepository.kt`, `android/.../ui/ArtelRoot.kt`,
+`android/.../ui/screens/dashboard/DashboardScreen.kt`.
+
+---
+
+## Android: вход как на сайте — адрес сервера вводится в приложении (2026-10-26)
+**Дата:** 2026-10-26. Профиль «Бизнес-фича» (loop-run), milestone run-2026-10-26.
+
+**Задание:** приложение должно быть пригодно для любых пользователей — так
+же, как любой может открыть сайт: адрес рабочей области вводит сам
+пользователь (как URL сайта в браузере), админка под паролем. Механика
+«адрес зашивается при сборке через `-Partel.serverUrl` →
+`BuildConfig.DEFAULT_SERVER_URL`, поле адреса скрыто» удалена полностью.
+
+**Что сделано:**
+- Android: `ConnectViewModel` без параметра `bakedServerUrl` и флага
+  `hasBakedUrl`; поле «Адрес сервера» всегда показывается и редактируется;
+  последний успешный адрес подставляется безусловно (и после
+  logout/401) из DataStore (`lastServerUrl`). Placeholder нейтральный
+  `https://artel.example.com`, клавиатура URL.
+- Android: чистый `ConnectRules` (валидация ввода + человекочитаемые
+  причины сбоев: unresolved host / cleartext в release / таймаут-подключение)
+  — VM-ветки `IOException` Login и bootstrap теперь дают конкретную
+  подсказку, а не сырой `e.message`; +9 юнит-тестов.
+- Gradle: удалены baked-блок и `buildConfig = true` (BuildConfig больше
+  никем не используется); версия 1.1.0 (versionCode 3).
+- Docs: `android/README.md` — механика «адрес + пароль» без зашивания;
+  `docs/api-contracts.md` — то же в контракте мобильного входа.
+
+**Проверки:** Android `:app:testDebugUnitTest :app:assembleDebug` —
+successfully, 55 юнит-тестов (+9 `ConnectRulesTest`); `git diff` — только
+файлы задачи. Web/challenge не менялись (typecheck из предыдущего прогона —
+чисто).
+
+**Риски/ограничения:** как и прежде: сервер по адресу, который ввёл
+пользователь, должен быть запущен и доступен с телефона (LAN/Tailscale);
+cleartext только в debug-сборках, release требует https-адреса. Полный
+паритет экранов приложения с web-админкой (rag/chat/tg/blog/mcp/sys/
+integrations) — backlog в issue эпика (milestone run-2026-10-26).
+
+**Код:** `android/app/build.gradle.kts`,
+`android/.../ui/screens/connect/ConnectScreen.kt`,
+`android/.../ui/screens/connect/ConnectRules.kt`,
+`android/app/src/test/java/ru/memo7/artel/ui/screens/connect/ConnectRulesTest.kt`,
+`android/README.md`, `docs/api-contracts.md`.
+
+---
+
+## Android: чат — MVP-паритет web /chat (2026-10-26)
+**Дата:** 2026-10-26. Профиль «Бизнес-фича» (loop-run), milestone
+run-2026-10-26, стори #137 эпика #134 (паритет web↔app).
+
+**Задание:** функциональный блок «Чат» в приложении «Артель»: те же сессии, что
+на web `/chat` — список, создание с выбором стратегии памяти и системного
+промпта, переписка с живым SSE-стримингом, остановка генерации, сброс
+истории. Скоуп MVP не включает `joker/antonov`, панели
+memory/branch/profile/constraints — они остаются в backlog эпика.
+
+**Что сделано:**
+- Чистый SSE-парсер `data/api/ChatStream.kt`: безымянные события
+  `data: <JSON>` через `\n\n` (контракт web `web/lib/shared/sse.ts`:
+  `token{delta}` / `done{answer,usage}` / `error{message}`; конец потока —
+  закрытие соединения, `[DONE]`-сентинела нет). Session-feed API
+  (`drain`), битые/неизвестные события молча пропускаются.
+- Репозиторий: `chatSessions`, `createChatSession`, `chatSession`,
+  `resetChatSession` (Retrofit) и `chatStream` — OkHttp напрямую
+  (readTimeout 0, connect 15 c, Bearer как в остальных запросах; 401
+  очищает токен той сессии, что шла в запрос — как в общем каркасе).
+  Отмена стрима (`cancelChatStream`) — кнопка «Остановить»; okhttp call
+  cancel не роняет UI: partial текст остаётся в пузыре.
+- Экраны: `ChatsScreen` (список сессий + диалог создания: стратегия
+  full/sliding/sticky/branching, системный промпт ≤2000) и `ChatScreen`
+  (история из GET /api/chat/[id] без системных реплик, пузыри со
+  стрим-текстом, стоп, сброс с подтверждением, счётчик токенов в шапке).
+  Вход: карточка «Чат» на дашборде + маршруты `chat` / `chat/{sessionId}`.
+- Тесты: `ChatStreamTest` (5 кейсов парсера: последовательность,
+  чанки-дописывание, битый JSON, неизвестные события, пробелы после
+  `data:`), `ChatContractTest` (декодирование сессии/списка, кодирование
+  запросов).
+
+**Проверки:** `:app:testDebugUnitTest :app:assembleDebug` — зелёные;
+контракт — против реальных строк SSE-формата из
+`web/app/api/chat/[sessionId]/route.ts` (data-prefix, `\n\n`, три типа
+событий). Diff — только файлы чата. Новых зависимостей НЕТ (okhttp-sse не
+добавлялся — парсер ручной).
+
+**Риски/ограничения:** usage в стриме — аппроксимация сервера (символы/4);
+при 401 экран остаётся с ошибкой, повторный вход — как для остальных
+разделов; панели памяти/веток прикреплены к следующим стори эпика #134.
+
+**Код:** `android/.../data/api/ChatStream.kt`,
+`android/.../data/api/ApiModels.kt` (chat-секция),
+`android/.../data/api/ArtelApi.kt`, `android/.../data/ArtelRepository.kt`,
+`android/.../ui/screens/chat/ChatsScreen.kt`,
+`android/.../ui/screens/chat/ChatScreen.kt`,
+`android/.../ui/ArtelRoot.kt`,
+`android/.../ui/screens/dashboard/DashboardScreen.kt`,
+`android/app/src/test/java/ru/memo7/artel/data/api/ChatStreamTest.kt`,
+`android/app/src/test/java/ru/memo7/artel/data/api/ChatContractTest.kt`.
+
+---
+
+## Feature: курс — недели 8–9 Advanced-потока (полная транскрипция + выдержки) (2026-10-26)
+**Дата:** 2026-10-26. Профиль: `business-feature`, loop-run, milestone `run-2026-10-26`.
+
+**Задание:** добавить в базу знаний курса транскрипции «8 неделя 1 поток
+адвансд» и «9 неделя 1 поток адвансд» — так же, как предыдущие уроки:
+полная транскрипция с таймкодами + курирование (summary/why/pain/выдержки),
+чтобы уроки были видны и понятны в web (`/course`) и Android («Артель»).
+
+**Сделано:**
+- Конвертация md-транскриптов в формат импортера
+  `*.transcript.json` (utterances `MM:SS → ms`, end = start следующего,
+  длительность 24:59 и 28:31) — источники в `challenge/.data/course-sources/`
+  (вне git), 74 и 28 абзацев.
+- Курирование: `challenge/src/data/course/week-8.json` (код-ассистент:
+  main-агент, субагенты, скиллы/команды/хуки, правила open–close, профили,
+  инварианты, Task State, Execution Loop, MCP-набор) и `week-9.json`
+  (файн-тюнинг: attention/LoRA/QLoRA, датасеты, оверфиттинг, границы
+  применимости), по 10 выдержек каждая.
+- Импорт CLI `course-import` — в course.sqlite добавлены week-8 (10 секций)
+  и week-9 (26 секций); upsert идемпотентный, web/Android изменений кода
+  не требуют (список строится из CourseDb, упорядочен по week_no).
+
+**Проверки:** challenge typecheck зелёный + 280/280 тестов; web typecheck +
+Vitest 541/541 (включая course-роуты); `pnpm --filter web build` — ок;
+smoke через `CourseDb.getLesson/getSections/getExcerpts` — оба урока
+рассекционированы (0–1 499 000 мс и 0–1 711 000 мс), выдержки на месте;
+повторный импорт безопасен (упsert). Экраны курса закрыты middleware
+(админ-cookie/Bearer) — как и раньше.
+
+**Риски/ограничения:** недели 8–9 — Advanced-поток; слаги `week-8`/`week-9`
+использованы напрямую и могут пересечься с будущей нумерацией основного
+потока (тогда переименовать слаги отдельной задачей). Android-сборка не
+прогонялась в этой сессии — нет JDK в среде; Kotlin-код не менялся.
+
+**Код:** `challenge/src/data/course/{week-8,week-9}.json`
+(данные, кода нет); драйверы импорта — уже существующие
+`challenge/src/{core/courseDb.ts,core/courseImport.ts,cli.ts}`.

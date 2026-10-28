@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  isHotDay,
+  isReleaseDay,
   computeNextNudgeAt,
   toCapsText,
   buildCapsMessage,
@@ -10,20 +10,21 @@ import {
   isAddressedToBot,
   stripAddress,
   pickMood,
+  pickPingCandidates,
 } from './maximBot.js';
 
 const EPOCH = '2026-10-06'; // релиз 41
 const PERIOD = 14;
 
-test('isHotDay: день релиза и следующий — hot, дальше — нет', () => {
-  assert.equal(isHotDay(new Date(2026, 9, 6, 15, 0), EPOCH, PERIOD), true); // релиз 41
-  assert.equal(isHotDay(new Date(2026, 9, 7, 9, 0), EPOCH, PERIOD), true); // день после
-  assert.equal(isHotDay(new Date(2026, 9, 8, 9, 0), EPOCH, PERIOD), false);
-  assert.equal(isHotDay(new Date(2026, 9, 20, 12, 0), EPOCH, PERIOD), true); // релиз 43
-  assert.equal(isHotDay(new Date(2026, 9, 21, 12, 0), EPOCH, PERIOD), true);
-  assert.equal(isHotDay(new Date(2026, 9, 19, 23, 59), EPOCH, PERIOD), false);
-  assert.equal(isHotDay(new Date(2026, 9, 5, 12, 0), EPOCH, PERIOD), false); // до эпохи
-  assert.equal(isHotDay(new Date(2026, 9, 6), 'кривая-дата', PERIOD), false);
+test('isReleaseDay: только день релиза, день после — обычный', () => {
+  assert.equal(isReleaseDay(new Date(2026, 9, 6, 15, 0), EPOCH, PERIOD), true); // релиз 41
+  assert.equal(isReleaseDay(new Date(2026, 9, 7, 9, 0), EPOCH, PERIOD), false); // день после
+  assert.equal(isReleaseDay(new Date(2026, 9, 8, 9, 0), EPOCH, PERIOD), false);
+  assert.equal(isReleaseDay(new Date(2026, 9, 20, 12, 0), EPOCH, PERIOD), true); // релиз 43
+  assert.equal(isReleaseDay(new Date(2026, 9, 21, 12, 0), EPOCH, PERIOD), false);
+  assert.equal(isReleaseDay(new Date(2026, 9, 19, 23, 59), EPOCH, PERIOD), false);
+  assert.equal(isReleaseDay(new Date(2026, 9, 5, 12, 0), EPOCH, PERIOD), false); // до эпохи
+  assert.equal(isReleaseDay(new Date(2026, 9, 6), 'кривая-дата', PERIOD), false);
 });
 
 const SCHED = {
@@ -31,31 +32,43 @@ const SCHED = {
   releasePeriodDays: PERIOD,
   dailyWindowStartHour: 10,
   dailyWindowEndHour: 20,
-  hotIntervalMinMin: 60,
-  hotIntervalMaxMin: 180,
-  normalIntervalDays: 3,
 };
 
-test('computeNextNudgeAt: hot-день — через 60–180 минут', () => {
-  const now = new Date(2026, 9, 20, 15, 0); // день релиза 43
-  const next = computeNextNudgeAt(now, SCHED, () => 0.5);
-  const deltaMin = (next - now.getTime()) / 60_000;
-  assert.ok(deltaMin >= 60 && deltaMin <= 180, `delta=${deltaMin}`);
+test('computeNextNudgeAt: релизный день, окно впереди — слот сегодня', () => {
+  const now = new Date(2026, 9, 20, 8, 0); // день релиза 43, утро
+  const next = computeNextNudgeAt(now, SCHED, () => 0);
+  assert.equal(next, new Date(2026, 9, 20, 10, 0).getTime());
 });
 
-test('computeNextNudgeAt: обычный день — слот в окне 10–20 сегодня или через 3 дня', () => {
-  const morning = new Date(2026, 9, 8, 8, 0); // обычный день, слот ещё впереди
-  const nextMorning = computeNextNudgeAt(morning, SCHED, () => 0);
-  assert.equal(nextMorning, new Date(2026, 9, 8, 10, 0).getTime());
+test('computeNextNudgeAt: релизный день, слот внутри окна — случайный час', () => {
+  const now = new Date(2026, 9, 20, 12, 0);
+  const next = computeNextNudgeAt(now, SCHED, () => 0.999);
+  assert.ok(next > now.getTime());
+  assert.ok(next <= new Date(2026, 9, 20, 20, 0).getTime());
+});
 
-  const evening = new Date(2026, 9, 8, 21, 0); // слот прошёл → через 3 дня
-  const nextEvening = computeNextNudgeAt(evening, SCHED, () => 0);
-  assert.equal(nextEvening, new Date(2026, 9, 11, 10, 0).getTime());
+test('computeNextNudgeAt: релизный день, окно прошло — следующий релиз', () => {
+  const now = new Date(2026, 9, 20, 21, 0); // слот сегодня уже прошёл
+  const next = computeNextNudgeAt(now, SCHED, () => 0);
+  assert.equal(next, new Date(2026, 10, 3, 10, 0).getTime()); // релиз 45
+});
 
-  const noon = new Date(2026, 9, 8, 12, 0); // внутри окна → слот сегодня до 20:00
-  const inWindow = computeNextNudgeAt(noon, SCHED, () => 0.999);
-  assert.ok(inWindow > noon.getTime());
-  assert.ok(inWindow <= new Date(2026, 9, 8, 20, 0).getTime());
+test('computeNextNudgeAt: обычный день — ближайший релиз', () => {
+  const now = new Date(2026, 9, 8, 12, 0); // обычный день
+  const next = computeNextNudgeAt(now, SCHED, () => 0);
+  assert.equal(next, new Date(2026, 9, 20, 10, 0).getTime());
+});
+
+test('computeNextNudgeAt: до эпохи — первый релиз', () => {
+  const now = new Date(2026, 8, 30, 12, 0);
+  const next = computeNextNudgeAt(now, SCHED, () => 0);
+  assert.equal(next, new Date(2026, 9, 6, 10, 0).getTime());
+});
+
+test('computeNextNudgeAt: битая эпоха — напутствий нет', () => {
+  const cfg = { ...SCHED, releaseEpoch: 'кривая-дата' };
+  const next = computeNextNudgeAt(new Date(2026, 9, 20, 12, 0), cfg, () => 0);
+  assert.ok(next >= 8.64e15);
 });
 
 test('toCapsText: верхний регистр и восклицания', () => {
@@ -128,4 +141,59 @@ test('pickMood: вспышка по кубику', () => {
   assert.equal(pickMood(() => 0.149), 'angry');
   assert.equal(pickMood(() => 0.15), 'calm');
   assert.equal(pickMood(() => 0.9), 'calm');
+});
+
+const PINGS = [
+  { id: 1, username: 'maxim', lastSeen: 500, lastPingedAt: 0 },
+  { id: 2, username: 'temi4', lastSeen: 400, lastPingedAt: 0 },
+  { id: 3, username: 'alina', lastSeen: 300, lastPingedAt: 0 },
+  { id: 4, username: 'kot', lastSeen: 200, lastPingedAt: 0 },
+  { id: 5, username: 'kirill', lastSeen: 100, lastPingedAt: 0 },
+];
+
+test('pickPingCandidates: без истории пингов — поочерёдно, а не самые свежие', () => {
+  // Все lastPingedAt равны → берём тех, кто дольше молчал, а не топ по lastSeen.
+  const picked = pickPingCandidates(PINGS, 999, 3);
+  assert.deepEqual(picked.map((p) => p.username), ['kirill', 'kot', 'alina']);
+});
+
+test('pickPingCandidates: ротация — следующим заходом идут другие', () => {
+  const now = 1000;
+  const round1 = pickPingCandidates(PINGS, 999, 3);
+  assert.deepEqual(round1.map((p) => p.username), ['kirill', 'kot', 'alina']);
+  for (const p of round1) p.lastPingedAt = now;
+  // Раунд 2: сначала никогда не пингованные (temi4, maxim), затем — самый
+  // давний из пингованных (kirill).
+  const round2 = pickPingCandidates(PINGS, 999, 3);
+  assert.deepEqual(round2.map((p) => p.username), ['temi4', 'maxim', 'kirill']);
+  // Раунд 3: все пингованы → сначала те, чей пинг старее, среди равных —
+  // кто дольше молчал.
+  const later = 2000;
+  for (const p of round2) p.lastPingedAt = later;
+  const round3 = pickPingCandidates(PINGS, 999, 3);
+  assert.deepEqual(round3.map((p) => p.username), ['kot', 'alina', 'kirill']);
+});
+
+test('pickPingCandidates: автор исключается, без юзернейма не пингуем', () => {
+  const list = [
+    { id: 1, username: 'maxim', lastSeen: 500, lastPingedAt: 0 },
+    { id: 2, username: undefined, lastSeen: 400, lastPingedAt: 0 },
+    { id: 3, username: 'alina', lastSeen: 300, lastPingedAt: 0 },
+  ];
+  assert.deepEqual(
+    pickPingCandidates(list, 1, 3).map((p) => p.username),
+    ['alina'],
+  );
+});
+
+test('pickPingCandidates: никогда не пингованные (lastPingedAt=0) идут первыми', () => {
+  const list = [
+    { id: 1, username: 'a', lastSeen: 900, lastPingedAt: 100 },
+    { id: 2, username: 'b', lastSeen: 10, lastPingedAt: 0 },
+    { id: 3, username: 'c', lastSeen: 800, lastPingedAt: 50 },
+  ];
+  assert.deepEqual(
+    pickPingCandidates(list, 999, 2).map((p) => p.username),
+    ['b', 'c'],
+  );
 });

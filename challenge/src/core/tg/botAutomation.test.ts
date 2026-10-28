@@ -6,7 +6,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { BotAutomationCommands, redactRunError } from './botAutomation.js';
-import type { AutomationCommandsSource } from './botAutomation.js';
+import type {
+  AutomationCommandsSource,
+  TopicPostRequest,
+  TopicPostResult,
+} from './botAutomation.js';
 import type { AutomationRuleRow, AutomationRunResult, AutomationRunRow } from '../automation.js';
 import type { BlogDb, BlogRow } from '../db.js';
 
@@ -21,6 +25,8 @@ function blog(id: number, slug: string, name: string): BlogRow {
     tg_chat_id: null,
     sources: null,
     style_preset: 'default',
+    system_prompt: null,
+    context_prompt: null,
     created_at: '2026-01-01T00:00:00.000Z',
   };
 }
@@ -43,6 +49,7 @@ interface Harness {
   sent: Array<{ chatId: string; text: string; replyTo?: number }>;
   upserts: Array<{ blogId: number; enabled: boolean }>;
   runNowCalls: number[];
+  postCalls: Array<{ blogId: number; req: TopicPostRequest }>;
 }
 
 function makeHarness(
@@ -51,6 +58,8 @@ function makeHarness(
     rules?: Map<number, AutomationRuleRow>;
     runs?: AutomationRunRow[];
     runNowThrow?: Error;
+    postThrow?: Error;
+    postResult?: TopicPostResult;
   } = {},
 ): Harness {
   const blogs = opts.blogs ?? [
@@ -62,6 +71,7 @@ function makeHarness(
   const sent: Harness['sent'] = [];
   const upserts: Harness['upserts'] = [];
   const runNowCalls: Harness['runNowCalls'] = [];
+  const postCalls: Harness['postCalls'] = [];
   const automation = {
     getRule: (blogId: number) => rules.get(blogId) ?? null,
     listRuns: () => runs,
@@ -79,11 +89,16 @@ function makeHarness(
   const commands = new BotAutomationCommands({
     automation,
     blogs: { listBlogs: () => blogs } satisfies Pick<BlogDb, 'listBlogs'>,
+    postTopic: async (blog, req) => {
+      postCalls.push({ blogId: blog.id, req });
+      if (opts.postThrow) throw opts.postThrow;
+      return opts.postResult ?? { ids: [100], published: req.publish, message: 'ok' };
+    },
     send: async (chatId, text, replyTo) => {
       sent.push({ chatId, text, replyTo });
     },
   });
-  return { commands, sent, upserts, runNowCalls };
+  return { commands, sent, upserts, runNowCalls, postCalls };
 }
 
 test('cmdBlogs: пустой список — честное «Блогов пока нет»', async () => {
@@ -175,6 +190,72 @@ test('cmdAuto: run — ошибка runNow отвечает урезанным �
   assert.doesNotMatch(text, /https?:\/\//);
   assert.doesNotMatch(text, /tok12345/);
   assert.doesNotMatch(text, /abcdef1234567890/);
+});
+
+test('cmdPost: пустой вызов и короткая тема — usage', async () => {
+  const h = makeHarness();
+  await h.commands.cmdPost('', CHAT);
+  await h.commands.cmdPost('artemia ok', CHAT);
+  assert.equal(h.postCalls.length, 0);
+  assert.equal(h.sent.length, 2);
+  assert.match(h.sent[0]?.text ?? '', /Формат: \/пост <блог> \[publish\] <тема>/);
+  assert.match(h.sent[1]?.text ?? '', /Формат: \/пост/);
+});
+
+test('cmdPost: неизвестный блог — отказ со ссылкой на /блоги', async () => {
+  const h = makeHarness();
+  await h.commands.cmdPost('nosuch Рождество', CHAT, 12);
+  assert.equal(h.postCalls.length, 0);
+  assert.equal(h.sent.length, 1);
+  assert.equal(h.sent[0]?.replyTo, 12);
+  assert.match(h.sent[0]?.text ?? '', /Блог «nosuch» не найден/);
+  assert.match(h.sent[0]?.text ?? '', /\/блоги/);
+});
+
+test('cmdPost: без publish создаёт черновик и показывает id', async () => {
+  const h = makeHarness();
+  await h.commands.cmdPost('artemia Рождественская служба', CHAT, 7);
+  assert.deepEqual(h.postCalls, [
+    {
+      blogId: 2,
+      req: { topic: 'Рождественская служба', variants: 1, publish: false },
+    },
+  ]);
+  assert.equal(h.sent.length, 2);
+  assert.match(h.sent[1]?.text ?? '', /📝 «Артемия Артель»: черновик создан \(#100\)/);
+  assert.match(h.sent[1]?.text ?? '', /публикация не выполнялась/);
+});
+
+test('cmdPost: publish + комментарий через | публикует в TG', async () => {
+  const h = makeHarness();
+  await h.commands.cmdPost('artemia publish Рождество | служба в 9:00', CHAT);
+  assert.deepEqual(h.postCalls, [
+    {
+      blogId: 2,
+      req: {
+        topic: 'Рождество',
+        comment: 'служба в 9:00',
+        variants: 1,
+        publish: true,
+      },
+    },
+  ]);
+  assert.match(h.sent[1]?.text ?? '', /✅ «Артемия Артель»: пост опубликован в TG \(#100\)/);
+});
+
+test('cmdPost: ошибка генерации/публикации — redact без URL и токенов', async () => {
+  const h = makeHarness({
+    postThrow: new Error(
+      'Telegram fetch https://api.telegram.org/bot123/sendMessage упал (Bearer tok12345)',
+    ),
+  });
+  await h.commands.cmdPost('artemia publish Рождество', CHAT);
+  const text = h.sent.at(-1)?.text ?? '';
+  assert.match(text, /⚠️ «Артемия Артель»: не удалось создать пост — /);
+  assert.match(text, /<url>/);
+  assert.match(text, /Bearer \*\*\*/);
+  assert.doesNotMatch(text, /api\.telegram\.org/);
+  assert.doesNotMatch(text, /tok12345/);
 });
 
 test('redactRunError: URL, Bearer и sk- токены маскируются, длина капится 200', () => {

@@ -22,6 +22,8 @@ export interface BlogRow {
   tg_chat_id: string | null; // chat_id TG-канала блога; null = общий TG_CHAT_ID
   sources: string | null;    // JSON-массив URL RSS; null = дефолтные футбольные фиды
   style_preset: StylePreset; // пресет стиля (stylePreset.ts); 'default' = профиль + few-shot
+  system_prompt: string | null;  // per-blog override системного промпта; null = пресет/шаблон
+  context_prompt: string | null; // постоянный контекст блога (факты, аудитория, тон)
   created_at: string;
 }
 
@@ -32,9 +34,9 @@ export const DEFAULT_BLOG_SLUG = 'lookatfacts';
 // двух новых блогов заполняются позже (PATCH /api/blogs/[slug], профили — /chat).
 // Блог «Факты» (lookatfacts) пишет пресетом Антонова (stylePreset.ts).
 const SEED_BLOGS: Array<Omit<BlogRow, 'id' | 'created_at'>> = [
-  { slug: DEFAULT_BLOG_SLUG, name: 'Иди на факты глянь', profile: 'default', tg_chat_id: null, sources: null, style_preset: 'antonov' },
-  { slug: 'artemia-artel', name: 'Артемия Артель', profile: null, tg_chat_id: null, sources: null, style_preset: 'default' },
-  { slug: 'nevsky-hram', name: 'Невский храм на Доваторцев', profile: null, tg_chat_id: null, sources: null, style_preset: 'default' },
+  { slug: DEFAULT_BLOG_SLUG, name: 'Иди на факты глянь', profile: 'default', tg_chat_id: null, sources: null, style_preset: 'antonov', system_prompt: null, context_prompt: null },
+  { slug: 'artemia-artel', name: 'Артемия Артель', profile: null, tg_chat_id: null, sources: null, style_preset: 'default', system_prompt: null, context_prompt: null },
+  { slug: 'nevsky-hram', name: 'Невский храм на Доваторцев', profile: null, tg_chat_id: null, sources: null, style_preset: 'default', system_prompt: null, context_prompt: null },
 ];
 
 export interface NewsRow {
@@ -54,6 +56,8 @@ export interface PostRow {
   news_id: number | null;
   content: string;
   verdict: string | null;      // результат фактчекинга
+  topic: string | null;        // тема ручного/праздничного поста (news_id null)
+  variant: number;             // 0 = базовый; 1..N-1 — альтернативные подачи
   created_at: string;
   blog_id: number | null;
 }
@@ -74,6 +78,8 @@ CREATE TABLE IF NOT EXISTS blogs (
   tg_chat_id TEXT,
   sources TEXT,
   style_preset TEXT NOT NULL DEFAULT 'default',
+  system_prompt TEXT,
+  context_prompt TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -94,6 +100,8 @@ CREATE TABLE IF NOT EXISTS posts (
   news_id INTEGER,
   content TEXT NOT NULL,
   verdict TEXT,
+  topic TEXT,
+  variant INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   blog_id INTEGER,
   FOREIGN KEY (news_id) REFERENCES news(id)
@@ -137,6 +145,14 @@ export class BlogDb {
         .prepare(`UPDATE blogs SET style_preset = 'antonov' WHERE slug = ?`)
         .run(DEFAULT_BLOG_SLUG);
     }
+    // Per-blog промпты: явный system_prompt замещает пресет/шаблон, context_prompt
+    // добавляет постоянный контекст. Старые БД получают NULL — поведение не меняется.
+    if (!this.hasColumn('blogs', 'system_prompt')) {
+      this.db.exec('ALTER TABLE blogs ADD COLUMN system_prompt TEXT');
+    }
+    if (!this.hasColumn('blogs', 'context_prompt')) {
+      this.db.exec('ALTER TABLE blogs ADD COLUMN context_prompt TEXT');
+    }
     // На базах, созданных до мульти-блога, колонок нет — ALTER + разовый бэкфилл
     // всего существующего контента в блог по умолчанию. На свежей БД колонки уже
     // в CREATE, строк нет — бэкфилл не нужен.
@@ -150,6 +166,13 @@ export class BlogDb {
             .run(backfillTo);
         }
       }
+    }
+    // Ручные/праздничные посты: тема и номер варианта (0 = базовый).
+    if (!this.hasColumn('posts', 'topic')) {
+      this.db.exec('ALTER TABLE posts ADD COLUMN topic TEXT');
+    }
+    if (!this.hasColumn('posts', 'variant')) {
+      this.db.exec('ALTER TABLE posts ADD COLUMN variant INTEGER NOT NULL DEFAULT 0');
     }
     // Индексы blog-колонок здесь, а не в SCHEMA: на легаси-базе колонка появляется
     // только в ALTER выше — CREATE INDEX по ней упал бы до этого.
@@ -202,11 +225,27 @@ export class BlogDb {
 
   updateBlog(
     id: number,
-    patch: { name?: string; profile?: string | null; tg_chat_id?: string | null; sources?: string | null; style_preset?: StylePreset },
+    patch: {
+      name?: string;
+      profile?: string | null;
+      tg_chat_id?: string | null;
+      sources?: string | null;
+      style_preset?: StylePreset;
+      system_prompt?: string | null;
+      context_prompt?: string | null;
+    },
   ): void {
     const sets: string[] = [];
     const values: Array<string | null> = [];
-    for (const key of ['name', 'profile', 'tg_chat_id', 'sources', 'style_preset'] as const) {
+    for (const key of [
+      'name',
+      'profile',
+      'tg_chat_id',
+      'sources',
+      'style_preset',
+      'system_prompt',
+      'context_prompt',
+    ] as const) {
       const val = patch[key];
       if (val !== undefined) {
         sets.push(`${key} = ?`);
@@ -270,11 +309,13 @@ export class BlogDb {
     newsId: number | null,
     verdict: string | null = null,
     blogId?: number | null,
+    topic: string | null = null,
+    variant = 0,
   ): number {
     const stmt = this.db.prepare(
-      'INSERT INTO posts (news_id, content, verdict, blog_id) VALUES (?, ?, ?, ?)',
+      'INSERT INTO posts (news_id, content, verdict, blog_id, topic, variant) VALUES (?, ?, ?, ?, ?, ?)',
     );
-    const result = stmt.run(newsId, content, verdict, blogId ?? null);
+    const result = stmt.run(newsId, content, verdict, blogId ?? null, topic, variant);
     return Number(result.lastInsertRowid);
   }
 

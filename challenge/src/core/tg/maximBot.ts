@@ -1,11 +1,13 @@
-// Бот «Максим Артемьевич» — QA Lead front-back. Раз в N дней (по умолч. 3,
-// MAXIM_NORMAL_INTERVAL_DAYS; а в день релиза и на следующий — каждые 1–3 ч)
-// присылает в чат напутствие («с продом повнимательнее»,
-// «переводи в ревью»), сгенерированное DeepSeek с настраиваемой температурой
-// (/maxim_temp). Если за MAXIM_CAPS_DELAY_SEC (по умолч. 2 мин) в чате нет ни
-// одного человеческого сообщения — повторяет фразу КАПСОМ с пингом активных
-// участников. Релизный календарь: эпоха + период (env), hot-окно = день релиза
-// и день после.
+// Бот «Максим Артемьевич» — QA Lead front-back. Раз в две недели, в день
+// релиза (релизный календарь: эпоха + период, env; по умолч. 2026-10-06,
+// 14 дней — релизы 41, 43, …), присылает в чат одно напутствие в случайный
+// момент окна 10:00–20:00 локали («с продом повнимательнее», «переводи в
+// ревью»), сгенерированное DeepSeek с настраиваемой температурой
+// (/maxim_temp). Если за MAXIM_CAPS_DELAY_SEC (по умолч. 2 мин) в чате нет
+// ни одного человеческого сообщения — повторяет фразу КАПСОМ, пингуя
+// участников поочерёдно: первыми — тех, кого не пинговали дольше всех.
+// В остальное время молчит, но отвечает на обращения: реплай на его
+// сообщение, @упоминание, «максим, …» или любое сообщение в личке.
 //
 // Сеть — Bot API через BotApiClient/netFetch (chokepoint), LLM — LlmClient
 // (DeepSeek приоритетно, env DEEPSEEK_API_KEY). Состояние (offset, температура,
@@ -32,17 +34,15 @@ function localMidnight(d: Date): number {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Hot-день: день релиза или следующий за ним. epoch — 'YYYY-MM-DD'.
+ * День релиза по календарю: epoch — 'YYYY-MM-DD', далее каждые periodDays.
  * Битую эпоху трактуем как «календаря нет» → всегда false.
  */
-export function isHotDay(now: Date, epoch: string, periodDays: number): boolean {
+export function isReleaseDay(now: Date, epoch: string, periodDays: number): boolean {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(epoch);
   if (!m) return false;
   const epochMs = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime();
   const diffDays = Math.round((localMidnight(now) - epochMs) / DAY_MS);
-  if (diffDays < 0) return false;
-  const mod = diffDays % periodDays;
-  return mod === 0 || mod === 1;
+  return diffDays >= 0 && diffDays % periodDays === 0;
 }
 
 export interface NudgeScheduleCfg {
@@ -50,38 +50,80 @@ export interface NudgeScheduleCfg {
   releasePeriodDays: number;
   dailyWindowStartHour: number;
   dailyWindowEndHour: number;
-  hotIntervalMinMin: number;
-  hotIntervalMaxMin: number;
-  /** Интервал напутствий в обычные (не релизные) дни. */
-  normalIntervalDays: number;
 }
 
+/** Битая эпоха = нет календаря = нет напутствий (макс. валидная дата). */
+const NEVER = 8.64e15;
+
 /**
- * Когда слать следующее напутствие. Hot-день — через случайные min–max минут.
- * Обычный день — один раз в normalIntervalDays дней, в случайном часе окна
- * [start, end); если сегодняшний слот уже прошёл (или сейчас позже него) —
- * слот через normalIntervalDays дней.
+ * Когда слать следующее напутствие: ближайший релизный день (сегодня, если
+ * он релизный и слот ещё впереди, иначе — следующий по календарю), случайный
+ * момент окна [start, end) локального времени.
  */
 export function computeNextNudgeAt(
   now: Date,
   cfg: NudgeScheduleCfg,
   rng: () => number = Math.random,
 ): number {
-  if (isHotDay(now, cfg.releaseEpoch, cfg.releasePeriodDays)) {
-    const span = Math.max(0, cfg.hotIntervalMaxMin - cfg.hotIntervalMinMin);
-    return now.getTime() + (cfg.hotIntervalMinMin + rng() * span) * 60_000;
-  }
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(cfg.releaseEpoch);
+  if (!m) return NEVER;
+  const epochMs = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime();
   const start = Math.min(cfg.dailyWindowStartHour, cfg.dailyWindowEndHour);
   const end = Math.max(cfg.dailyWindowStartHour, cfg.dailyWindowEndHour);
-  const slot = new Date(now.getFullYear(), now.getMonth(), now.getDate(), start);
-  const slotMs = slot.getTime() + rng() * Math.max(1, end - start) * 3_600_000;
-  return slotMs > now.getTime() ? slotMs : slotMs + cfg.normalIntervalDays * DAY_MS;
+  const slotOn = (dayMs: number): number => {
+    const d = new Date(dayMs);
+    return (
+      new Date(d.getFullYear(), d.getMonth(), d.getDate(), start).getTime() +
+      rng() * Math.max(1, end - start) * 3_600_000
+    );
+  };
+  const todayMs = localMidnight(now);
+  const diffDays = Math.round((todayMs - epochMs) / DAY_MS);
+  let releaseDayMs: number;
+  if (diffDays < 0) {
+    releaseDayMs = epochMs;
+  } else {
+    const rem = diffDays % cfg.releasePeriodDays;
+    releaseDayMs = todayMs + (rem === 0 ? 0 : cfg.releasePeriodDays - rem) * DAY_MS;
+  }
+  let slot = slotOn(releaseDayMs);
+  if (slot <= now.getTime()) {
+    slot = slotOn(releaseDayMs + cfg.releasePeriodDays * DAY_MS);
+  }
+  return slot;
 }
 
 /** Капс-версия напутствия: верхний регистр + гарантированные восклицания. */
 export function toCapsText(text: string): string {
   const up = text.trim().toUpperCase();
   return up.includes('!') ? up : `${up}!!!`;
+}
+
+/** Минимальный слайс участника для ротации пингов. */
+export interface PingCandidate {
+  id: number;
+  username?: string;
+  lastSeen: number;
+  /** Когда пинговали последний раз (0 — никогда). */
+  lastPingedAt: number;
+}
+
+/**
+ * Поочерёдный выбор, кого пинговать: первыми те, кого не пинговали дольше всех
+ * (lastPingedAt), при равенстве — кто дольше молчал (lastSeen). Автор (exceptId)
+ * исключается. Так за несколько капсов теги расходятся по всему чату, а не
+ * вечно падают на два самых свежих аккаунта.
+ */
+export function pickPingCandidates<P extends PingCandidate>(
+  participants: readonly P[],
+  exceptId: number,
+  count: number,
+): P[] {
+  return participants
+    .filter((p) => p.id !== exceptId && p.username)
+    .slice()
+    .sort((a, b) => (a.lastPingedAt || 0) - (b.lastPingedAt || 0) || a.lastSeen - b.lastSeen)
+    .slice(0, count);
 }
 
 /** Капс-сообщение с пингом активных участников (юзернеймы через пробел). */
@@ -188,8 +230,8 @@ const FALLBACK_NUDGES: readonly string[] = [
 const START_INTRO = [
   'максим артемьевич, qa lead front-back.',
   '',
-  'слежу, чтобы релизы выходили без сюрпризов: иногда напоминаю в чате про',
-  'прод и ревью (в день релиза — чаще). если мне не отвечают — повышаю голос.',
+  'слежу, чтобы релизы выходили без сюрпризов: раз в две недели, в день',
+  'релиза, говорю своё веское слово. если мне не отвечают — повышаю голос.',
   '',
   'поговорить можно и так: реплай на моё сообщение, @упоминание или просто',
   '«максим, …» в чате. в личке — любое сообщение, я на связи.',
@@ -210,11 +252,11 @@ function cleanGenerated(text: string): string {
 async function generateNudge(
   llm: LlmClient,
   temperature: number,
-  hot: boolean,
+  release: boolean,
   rng: () => number = Math.random,
 ): Promise<string> {
-  const context = hot
-    ? 'Сейчас день релиза или день сразу после него — напутствие должно это чувствовать.'
+  const context = release
+    ? 'Сегодня день релиза — напутствие должно это чувствовать.'
     : 'Обычный рабочий день.';
   try {
     const raw = await llm.chat(
@@ -288,6 +330,8 @@ interface Participant {
   id: number;
   username?: string;
   lastSeen: number;
+  /** Когда участника последний раз пинговали в капс-сообщении (0 — никогда). */
+  lastPingedAt: number;
 }
 
 interface PendingNudge {
@@ -336,7 +380,14 @@ class MaximStateStore {
         temperature: typeof raw.temperature === 'number' ? raw.temperature : 1.0,
         nextNudgeAt: typeof raw.nextNudgeAt === 'number' ? raw.nextNudgeAt : 0,
         pending: raw.pending ?? null,
-        participants: Array.isArray(raw.participants) ? raw.participants : [],
+        participants: Array.isArray(raw.participants)
+          ? raw.participants.map((p) => ({
+              id: p.id,
+              username: p.username,
+              lastSeen: p.lastSeen,
+              lastPingedAt: typeof p.lastPingedAt === 'number' ? p.lastPingedAt : 0,
+            }))
+          : [],
       };
     } catch {
       return null;
@@ -356,17 +407,29 @@ class MaximStateStore {
       existing.username = user.username;
       existing.lastSeen = Date.now();
     } else {
-      list.push({ id: user.id, username: user.username, lastSeen: Date.now() });
+      list.push({
+        id: user.id,
+        username: user.username,
+        lastSeen: Date.now(),
+        lastPingedAt: 0,
+      });
     }
     list.sort((a, b) => b.lastSeen - a.lastSeen);
     if (list.length > PARTICIPANTS_CAP) list.length = PARTICIPANTS_CAP;
   }
 
+  /**
+   * Кого пинговать в капсе: поочерёдная ротация — первыми те, кого не пинговали
+   * дольше всех (lastPingedAt), при равенстве — кто молчал дольше. Автор
+   * сообщения (exceptId) не пингуется: он и так в чате. Пингуем только тех, у
+   * кого есть юзернейм.
+   */
   pingUsernames(exceptId: number): string[] {
-    return this.state.participants
-      .filter((p) => p.id !== exceptId && p.username)
-      .slice(0, PING_COUNT)
-      .map((p) => p.username as string);
+    const now = Date.now();
+    const candidates = pickPingCandidates(this.state.participants, exceptId, PING_COUNT);
+    for (const p of candidates) p.lastPingedAt = now;
+    if (candidates.length > 0) this.save();
+    return candidates.map((p) => p.username as string);
   }
 }
 
@@ -419,7 +482,12 @@ export async function runMaximBot(): Promise<void> {
   const store = new MaximStateStore(cfg);
   const st = store.state;
 
-  if (st.nextNudgeAt <= 0) {
+  // Миграция расписания: сохранённый nextNudgeAt, не попадающий на релизный
+  // день (остаток старой схемы «раз в N дней»), пересчитываем по календарю.
+  if (
+    st.nextNudgeAt <= 0 ||
+    !isReleaseDay(new Date(st.nextNudgeAt), cfg.releaseEpoch, cfg.releasePeriodDays)
+  ) {
     st.nextNudgeAt = computeNextNudgeAt(new Date(), cfg);
   }
   // Рестарт: протухший pending (старше 10 мин) не эскалируем — непонятно,
@@ -449,13 +517,13 @@ export async function runMaximBot(): Promise<void> {
   };
 
   const sendNudge = async (): Promise<void> => {
-    const hot = isHotDay(new Date(), cfg.releaseEpoch, cfg.releasePeriodDays);
-    const text = await generateNudge(llm, st.temperature, hot);
+    const release = isReleaseDay(new Date(), cfg.releaseEpoch, cfg.releasePeriodDays);
+    const text = await generateNudge(llm, st.temperature, release);
     const messageId = await api.sendMessage(cfg.chatId, text);
     st.pending = { messageId, text, sentAt: Date.now() };
     st.nextNudgeAt = computeNextNudgeAt(new Date(), cfg);
     store.save();
-    console.error(`[maxim-bot] напутствие отправлено (msg_id=${messageId ?? 'n/a'}, hot=${hot})`);
+    console.error(`[maxim-bot] напутствие отправлено (msg_id=${messageId ?? 'n/a'}, release=${release})`);
   };
 
   const sendCaps = async (): Promise<void> => {
@@ -522,14 +590,15 @@ export async function runMaximBot(): Promise<void> {
           if (isPrivate) await api.sendMessage(chatKey, 'напутствовал в чат');
         }
       } else {
-        const hot = isHotDay(new Date(), cfg.releaseEpoch, cfg.releasePeriodDays);
-        const etaMin = Math.max(0, Math.round((st.nextNudgeAt - Date.now()) / 60_000));
+        const release = isReleaseDay(new Date(), cfg.releaseEpoch, cfg.releasePeriodDays);
         await api.sendMessage(
           chatKey,
           [
-            `день: ${hot ? 'релизный, работаем плотно' : 'обычный'}`,
+            `день: ${release ? 'релизный, сегодня скажу своё слово' : 'обычный, молчу до релиза'}`,
             `температура: ${st.temperature}`,
-            st.pending ? 'жду реакции на своё сообщение' : `следующее напутствие через ~${etaMin} мин`,
+            st.pending
+              ? 'жду реакции на своё сообщение'
+              : `следующее напутствие: ${new Date(st.nextNudgeAt).toLocaleString('ru-RU')}`,
           ].join('\n'),
         );
       }

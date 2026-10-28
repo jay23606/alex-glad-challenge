@@ -24,6 +24,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Chat
+import androidx.compose.material.icons.rounded.Checklist
+import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Settings
@@ -46,6 +49,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
@@ -69,6 +73,7 @@ import ru.memo7.artel.ui.components.RingCaption
 import ru.memo7.artel.ui.components.PillBadge
 import ru.memo7.artel.ui.components.ScreenTitle
 import ru.memo7.artel.ui.components.StateContainer
+import ru.memo7.artel.ui.components.isCompactLayout
 import ru.memo7.artel.ui.components.rememberPressScale
 import ru.memo7.artel.ui.theme.ArtelShapes
 import ru.memo7.artel.ui.theme.Cheese
@@ -105,6 +110,10 @@ fun DashboardScreen(
     onOpenSettings: () -> Unit,
     onOpenSupport: () -> Unit,
     onOpenProjects: () -> Unit,
+    onOpenGamification: () -> Unit,
+    onOpenTodos: () -> Unit,
+    onOpenCourse: () -> Unit,
+    onOpenChat: () -> Unit,
 ) {
     val vm: DashboardViewModel = viewModel(
         factory = viewModelFactory { initializer { DashboardViewModel(container.repository) } }
@@ -155,6 +164,10 @@ fun DashboardScreen(
                 onOpenNotifications = onOpenNotifications,
                 onOpenSupport = onOpenSupport,
                 onOpenProjects = onOpenProjects,
+                onOpenGamification = onOpenGamification,
+                onOpenTodos = onOpenTodos,
+                onOpenCourse = onOpenCourse,
+                onOpenChat = onOpenChat,
             )
         }
     }
@@ -166,6 +179,10 @@ private fun DashboardContent(
     onOpenNotifications: () -> Unit,
     onOpenSupport: () -> Unit,
     onOpenProjects: () -> Unit,
+    onOpenGamification: () -> Unit,
+    onOpenTodos: () -> Unit,
+    onOpenCourse: () -> Unit,
+    onOpenChat: () -> Unit,
 ) {
     val game = data.gamification
     Column(
@@ -188,6 +205,7 @@ private fun DashboardContent(
                     .weight(1.45f)
                     .fillMaxSize(),
                 tint = MaterialTheme.colorScheme.surface,
+                onClick = onOpenGamification,
             ) {
                 Box(Modifier.padding(16.dp)) {
                     LevelRing(
@@ -261,7 +279,7 @@ private fun DashboardContent(
                 modifier = Modifier.weight(1f),
                 icon = Icons.Rounded.Folder,
                 value = data.counts.projects,
-                label = "проекты",
+                label = pluralRu(data.counts.projects, "проект", "проекта", "проектов"),
                 tint = MaterialTheme.colorScheme.primary,
                 onClick = onOpenProjects,
             )
@@ -269,7 +287,7 @@ private fun DashboardContent(
                 modifier = Modifier.weight(1f),
                 icon = Icons.Rounded.TaskAlt,
                 value = data.counts.openTasks,
-                label = "открытые задачи",
+                label = pluralRu(data.counts.openTasks, "задача", "задачи", "задач"),
                 tint = MaterialTheme.colorScheme.secondary,
                 onClick = onOpenProjects,
             )
@@ -277,7 +295,7 @@ private fun DashboardContent(
                 modifier = Modifier.weight(1f),
                 icon = Icons.Rounded.Notifications,
                 value = data.notifications.unread,
-                label = "новые",
+                label = pluralRu(data.notifications.unread, "новое", "новых", "новых"),
                 tint = MaterialTheme.colorScheme.tertiary,
                 onClick = onOpenNotifications,
             )
@@ -307,7 +325,7 @@ private fun DashboardContent(
                         val onTint = if (achievement.unlocked) {
                             MaterialTheme.colorScheme.onSecondary
                         } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
+                            MaterialTheme.colorScheme.onBackground
                         }
                         val interactionSource = remember { MutableInteractionSource() }
                         val scale = rememberPressScale(interactionSource, pressedScale = 0.92f)
@@ -319,7 +337,7 @@ private fun DashboardContent(
                                 .clickable(
                                     interactionSource = interactionSource,
                                     indication = LocalIndication.current,
-                                    onClick = {},
+                                    onClick = onOpenGamification,
                                 )
                                 .padding(horizontal = 14.dp, vertical = 10.dp)
                                 .width(150.dp),
@@ -328,21 +346,122 @@ private fun DashboardContent(
                                 (if (achievement.unlocked) "🏆 " else "🔒 ") + achievement.title,
                                 style = MaterialTheme.typography.titleMedium,
                                 color = onTint,
-                                maxLines = 1,
+                                maxLines = if (isCompactLayout()) 3 else 2,
+                                overflow = TextOverflow.Ellipsis,
                             )
                             Text(
                                 achievement.description,
                                 style = MaterialTheme.typography.labelMedium,
-                                color = onTint.copy(alpha = 0.75f),
+                                color = onTint,
                                 maxLines = 2,
                             )
                             PillBadge(
                                 text = if (achievement.unlocked) "получено" else "в процессе",
-                                tint = onTint,
+                                tint = if (achievement.unlocked) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.background,
+                                containerColor = if (achievement.unlocked) MaterialTheme.colorScheme.onSecondary else MaterialTheme.colorScheme.onBackground,
                                 modifier = Modifier.padding(top = 6.dp),
                             )
                         }
                     }
+                }
+            }
+        }
+
+        // Chat quick action
+        BentoCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            onClick = onOpenChat,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Rounded.Chat,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.tertiary,
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Чат", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Диалоги с LLM рабочей области — те же сессии, что на сайте",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Button(onClick = onOpenChat, shape = ArtelShapes.pill) {
+                    Text("Открыть", fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+
+        // Todos quick action
+        BentoCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            onClick = onOpenTodos,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Rounded.Checklist,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Задачи", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Повторяющиеся напоминания и разовые задачи",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Button(onClick = onOpenTodos, shape = ArtelShapes.pill) {
+                    Text("Открыть", fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+
+        // Course quick action
+        BentoCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            onClick = onOpenCourse,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Rounded.School,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.tertiary,
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Курс", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "I2N Challenge: транскрипции, выдержки, таймкоды",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Button(onClick = onOpenCourse, shape = ArtelShapes.pill) {
+                    Text("Открыть", fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -383,6 +502,17 @@ private fun DashboardContent(
     }
 }
 
+/** Русское множественное число: 1 проект / 2 проекта / 5 проектов; 11–14 → many. */
+internal fun pluralRu(n: Int, one: String, few: String, many: String): String {
+    val mod100 = n % 100
+    return when {
+        mod100 in 11..14 -> many
+        mod100 % 10 == 1 -> one
+        mod100 % 10 in 2..4 -> few
+        else -> many
+    }
+}
+
 @Composable
 private fun CountTile(
     modifier: Modifier,
@@ -392,7 +522,10 @@ private fun CountTile(
     tint: Color,
     onClick: () -> Unit,
 ) {
-    BentoCard(modifier = modifier.height(120.dp), onClick = onClick) {
+    // Компактный экран/крупный шрифт: выше и две строки подписи, чтобы «2 проекта» влезало целиком (#128).
+    // 142dp = 28 padding + 34 иконка + 39 значение + 39 две строки (все lineHeight ×1.3) + 2dp запас.
+    val compact = isCompactLayout()
+    BentoCard(modifier = modifier.height(if (compact) 142.dp else 120.dp), onClick = onClick) {
         Column(Modifier.padding(14.dp)) {
             Box(
                 modifier = Modifier
@@ -413,7 +546,8 @@ private fun CountTile(
                 label,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
+                maxLines = if (compact) 2 else 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }

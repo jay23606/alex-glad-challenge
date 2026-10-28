@@ -44,12 +44,16 @@ export async function runNewsPipeline(
     profile?: ProfileManager;
     blog?: BlogRow;
     signal?: AbortSignal;
+    /** Прогресс в sink вызова (CLI/REPL = console.log). Default — тишина:
+     * пайплайн гоняется и из web/automationRun, шуметь в их stdout нельзя (§8.2). */
+    log?: (line: string) => void;
   } = {},
 ): Promise<PipelineResult> {
   const maxAgeHours = opts.maxAgeHours ?? 24;
   const topK = opts.topK ?? 5;
   const blog = opts.blog ?? null;
   const profileActive = opts.profile?.active ?? null;
+  const log = opts.log ?? (() => {});
 
   // 0. Залить свежие RSS в БД (дубликаты по URL отсекаются UNIQUE-индексом).
   const { items: fresh, errors: rssErrors } = await fetchAllFeedsDetailed(
@@ -63,13 +67,13 @@ export async function runNewsPipeline(
   for (const item of items) {
     if (db.insertNews(toNewsRow(item), blog?.id)) added++;
   }
-  console.log(
+  log(
     `[pipeline] RSS${blog ? ` [${blog.slug}]` : ''}: получено ${items.length}, новых в БД ${added}`,
   );
 
   // Профиль для диагностики.
   if (opts.profile?.activeName) {
-    console.log(`[pipeline] Профиль: ${opts.profile.activeName} (${profileActive?.тематика ?? '—'})`);
+    log(`[pipeline] Профиль: ${opts.profile.activeName} (${profileActive?.тематика ?? '—'})`);
   }
 
   // 1. Агент 1 — выбрать топ новостей (только этого блога, приоритет = тематика).
@@ -81,7 +85,7 @@ export async function runNewsPipeline(
     blogId: blog?.id,
     focus: profileActive?.тематика,
   });
-  console.log(`[pipeline] Агент 1: кандидатов ${news.rawCount}, выбрано ${news.ranked.length}`);
+  log(`[pipeline] Агент 1: кандидатов ${news.rawCount}, выбрано ${news.ranked.length}`);
   if (news.ranked.length === 0) {
     return { news, post: null, factCheck: null, rssErrors };
   }
@@ -89,13 +93,13 @@ export async function runNewsPipeline(
   // По умолчанию — пишем пост про самую хайповую новость.
   const idx = Math.min(opts.writeForIndex ?? 0, news.ranked.length - 1);
   const chosen = news.ranked[idx].news;
-  console.log(`[pipeline] Готовим пост про: "${chosen.title}"`);
+  log(`[pipeline] Готовим пост про: "${chosen.title}"`);
 
   // 2. Агент 2 — написать пост (с профилем, если есть).
   opts.signal?.throwIfAborted();
   const writer = new PostWriter(client, opts.profile);
   const post = await writer.write(db, chosen, { blogId: blog?.id });
-  console.log(`[pipeline] Агент 2: пост написан (${post.content.length} символов)`);
+  log(`[pipeline] Агент 2: пост написан (${post.content.length} символов)`);
 
   // 3. Агент 3 — фактчекинг.
   opts.signal?.throwIfAborted();
@@ -104,7 +108,7 @@ export async function runNewsPipeline(
     topic: profileActive?.тематика,
   });
   const factCheck = await checker.check(post.content, chosen);
-  console.log(`[pipeline] Агент 3: verdict=${factCheck.verdict}, issues=${factCheck.issues.length}`);
+  log(`[pipeline] Агент 3: verdict=${factCheck.verdict}, issues=${factCheck.issues.length}`);
 
   // Сохранить пост + вердикт, пометить новость использованной.
   db.insertPost(post.content, chosen.id, JSON.stringify(factCheck), blog?.id);

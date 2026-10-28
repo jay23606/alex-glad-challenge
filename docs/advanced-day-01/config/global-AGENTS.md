@@ -1,5 +1,8 @@
 # Global engineering rules
 
+> **Historical (ADVANCED Day 1).** Superseded by `AGENTS.md` and `.omp/RULES.md`.
+> Do not follow this copy.
+
 These rules apply to every project. A project's `AGENTS.md` / `.omp/RULES.md`
 is more specific and wins on conflict.
 

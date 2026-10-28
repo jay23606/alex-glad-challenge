@@ -11,18 +11,18 @@ Stateless HMAC-cookie сессия одного администратора, б
 admin_session = `${exp}.${hex(HMAC-SHA256(WEB_AUTH_SECRET, "admin:" + exp))}`
 ```
 
-- Формат и проверки: `web/lib/auth.ts:7-8,50-55,58-71` (16 цифр exp, пересчёт HMAC,
+- Формат и проверки: `web/lib/auth.ts:20,50-56,58-72` (16 цифр exp, пересчёт HMAC,
   сравнение через timingSafeEqual по sha256-дайджестам). TTL 7 дней (`SESSION_MAX_AGE_S`).
 - Пароль: `WEB_ADMIN_PASSWORD`, сравнение timing-safe (`web/lib/auth.ts:42-48`).
 - Секреты читаются только в `web/lib/auth.ts` через `loadEnvUpward()`
   (`challenge/src/core/env.ts:12-27`); наружу — только Boolean-флаги
-  (`isAdminAuthConfigured`), значения не покидают модуль.
+  (`isAdminAuthConfigured`, `web/lib/auth.ts:29-34`), значения не покидают модуль.
 
 ## Два слоя проверки
 
-1. **Middleware-гейт** — `web/middleware.ts:73-96` (runtime nodejs): cookie
+1. **Middleware-гейт** — `web/middleware.ts:83-101` (runtime nodejs): cookie
    проверяется на каждом запросе, кроме точного allowlist `PUBLIC_PATHS`
-   (`web/middleware.ts:27-46`, exact match pathname, без префиксов).
+   (`web/middleware.ts:30-53`, exact match pathname, без префиксов).
    Неавторизованным: страницы → `302 /login?next=<pathname>` (query отбрасывается),
    `/api/*` → `401 JSON`. Fail-closed: без `WEB_AUTH_SECRET` валидных сессий не бывает.
 2. **Второй слой `requireAuth(req)`** — в роутах с внешними эффектами:
@@ -33,15 +33,34 @@ admin_session = `${exp}.${hex(HMAC-SHA256(WEB_AUTH_SECRET, "admin:" + exp))}`
 
 Для Server Components — `web/lib/server/session.ts` (`isAdminAuthed()` через `cookies()`).
 
+## Мобильный вход / Bearer-сессия
+
+- `POST /api/mobile/login` — публичный path (точное совпадение в `PUBLIC_PATHS`).
+  Принимает `{password}`, проверяет `WEB_ADMIN_PASSWORD` и возвращает тот же
+  `createSessionValue()` в теле как `token` (TTL 7 дней, **без** Set-Cookie),
+  `Cache-Control: no-store`; ошибки — `{ok:false,error}`.
+- Android шлёт `Authorization: Bearer <token>`. `isMobileAuthed`
+  (`web/lib/auth.ts:100-107`) принимает подписанную session-строку **или**
+  статический `MOBILE_API_TOKEN` (остаётся для автоматизации). Bearer действует
+  только на `/api/*` через middleware (`web/middleware.ts:86-87`), страницы он
+  не открывает; `requireAuth`-роуты (cookie-only: summary, rag/*, blog
+  digest/publish, telegram/publish, tg/collect) Bearer не принимают.
+- Rate-limit общий с `/api/auth/login` — `web/lib/server/loginRateLimit.ts`
+  (10 неудач / 15 мин, глобальное окно; успех сбрасывает окно).
+- Отзыва токена нет: он живёт до `exp`; инвалидация — только смена
+  `WEB_AUTH_SECRET`. «Выход» в Android удаляет токен только на устройстве.
+
 ## Компромиссы (осознанные)
 
-- Отзыва сессий нет: украденная cookie живёт до `exp`; единственная инвалидация —
-  смена `WEB_AUTH_SECRET`.
+- Отзыва сессий нет: украденная cookie (и выданный мобильный Bearer) живёт до
+  `exp`; единственная инвалидация — смена `WEB_AUTH_SECRET`. Мобильный «выход» —
+  только удаление токена на устройстве.
 - Cookie без `secure` и без `__Host-`-префикса; CSRF — `sameSite=lax`, отдельных
   токенов нет; logout — POST (`web/app/api/auth/logout/route.ts:1-3`).
 - Rate-limit логина глобальный (10 неудач/15 мин), не per-IP — сознательно
-  (`web/app/api/auth/login/route.ts:6-10,25-42`): 10 неверных попыток блокируют
-  вход владельцу, рестарт процесса сбрасывает счётчик.
+  (`web/lib/server/loginRateLimit.ts:1-33`): 10 неверных попыток блокируют
+  вход владельцу, рестарт процесса сбрасывает счётчик. Окно общее для
+  cookie-входа и мобильного `/api/mobile/login`.
 
 ## Inbound webhooks (публичный приём, HMAC вместо сессии)
 

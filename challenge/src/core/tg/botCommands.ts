@@ -18,6 +18,7 @@ export const BOT_COMMANDS = [
   'алиасскан',
   'блоги',
   'авто',
+  'пост',
   'off',
   'on',
   'стат',
@@ -36,6 +37,7 @@ export const BOT_COMMAND_ALIASES = {
   алиасскан: 'aliasscan',
   блоги: 'blogs',
   авто: 'auto',
+  пост: 'post',
   стат: 'stat',
 } as const;
 
@@ -71,6 +73,7 @@ export const BOT_COMMAND_DESCRIPTIONS = {
   aliasscan: 'Адм: поиск прозвищ в базе (/алиасскан)',
   blogs: 'Адм: блоги и правила автоматизации (/блоги)',
   auto: 'Адм: /авто <блог> on|off|status|run',
+  post: 'Адм: /пост <блог> [publish] <тема>',
   off: 'Адм: выключить бота',
   on: 'Адм: включить бота',
   stat: 'Адм: состояние (/стат)',

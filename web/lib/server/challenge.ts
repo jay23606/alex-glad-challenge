@@ -134,6 +134,31 @@ export { BlogAutomation, nextRunAfter } from '@challenge/core/automation';
 export type { AutomationRuleRow, AutomationRunRow, BlogRunOutcome, AutomationRunResult } from '@challenge/core/automation';
 // Общая фабрика прогона блога (pipeline + профиль + публикация по auto_publish).
 export { createAutomationRunner } from '@challenge/core/agents/automationRun';
+// Ручной/праздничный пост по теме (без RSS) + варианты подачи.
+export { TopicPostWriter, TOPIC_VARIANTS } from '@challenge/core/agents/topicWriter';
+export type { WrittenTopicPost, TopicVariantSpec } from '@challenge/core/agents/topicWriter';
+// Недельное расписание (Сб/Вс): слоты в таймзоне + идемпотентный прогон.
+export {
+  BlogScheduleStore,
+  DEFAULT_TIMEZONE,
+  MAX_ATTEMPTS,
+  dueScheduleSlots,
+  isValidTimeZone,
+  localClock,
+} from '@challenge/core/blogSchedule';
+export type {
+  BlogScheduleInput,
+  BlogScheduleRow,
+  BlogScheduleRunRow,
+  ScheduleSlot,
+} from '@challenge/core/blogSchedule';
+export { createBlogScheduleRunner } from '@challenge/core/agents/blogScheduleRun';
+export type {
+  BlogScheduleRunner,
+  SchedulePublish,
+  ScheduleRunOutcome,
+  BlogScheduleRunnerOptions,
+} from '@challenge/core/agents/blogScheduleRun';
 // Product: календарь + Google Calendar.
 export { buildIcs, deadlineEvent } from '@challenge/core/calendar';
 export type { CalendarEvent } from '@challenge/core/calendar';
@@ -154,3 +179,7 @@ export type { AssistantSnapshot } from '@challenge/core/assistant';
 // не секреты; потребители маскируют.
 export { getGoogleCalendarConfig, getMobileApiToken } from '@challenge/core/env';
 export type { GoogleCalendarConfig } from '@challenge/core/env';
+// Course: база знаний по лекциям курса (I2N Challenge): уроки, таймкодс-секции,
+// курированные выдержки. Импорт — CLI course-import.
+export { CourseDb } from '@challenge/core/courseDb';
+export type { LessonRow, SectionRow, ExcerptRow, LessonInput } from '@challenge/core/courseDb';

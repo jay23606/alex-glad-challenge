@@ -39,6 +39,12 @@ import {
 import { findRepoRoot } from './rag/docsCorpus.js';
 import { withTypecheckRollback } from './fileSafety.js';
 
+interface LogOpts {
+  /** Прогресс в sink вызова (CLI/REPL = console.log). Default — тишина:
+   * core-модуль может вызываться не только из CLI, шуметь в stdout нельзя (§8.2). */
+  readonly log?: (line: string) => void;
+}
+
 export interface RefactorResult {
   targetPath: string;
   beforeBytes: number;
@@ -55,7 +61,8 @@ export interface RefactorResult {
  * unified diff; --write → file_write под typecheck-rollback (pre-flight + snapshot
  * + post + restore-on-fail).
  */
-export async function runRefactor(goal: string, opts: { write: boolean }): Promise<RefactorResult> {
+export async function runRefactor(goal: string, opts: { write: boolean } & LogOpts): Promise<RefactorResult> {
+  const log = opts.log ?? (() => {});
   const q = clean(goal, 1000);
   if (q.length === 0) throw new Error('пустая цель');
   const target = resolveCodeTarget(q);
@@ -66,7 +73,7 @@ export async function runRefactor(goal: string, opts: { write: boolean }): Promi
 
   const cloud = makeRefineClient();
   if (!cloud) {
-    console.log(CLOUD_DOWN_MESSAGE);
+    log(CLOUD_DOWN_MESSAGE);
     return {
       targetPath: target.relPath,
       beforeBytes: 0,
@@ -81,15 +88,15 @@ export async function runRefactor(goal: string, opts: { write: boolean }): Promi
   const mcp = new McpStdioClient(command, args, undefined, false);
   try {
     await mcp.connect();
-    console.log(`[files] ▸ MCP file-server → file_read("${target.relPath}")`);
+    log(`[files] ▸ MCP file-server → file_read("${target.relPath}")`);
     const beforeRaw = await mcp.callToolText('file_read', { path: target.relPath });
     const before = stripLineNumbers(beforeRaw);
     const beforeBytes = Buffer.byteLength(before);
 
-    console.log('[files] ▸ сборка snippets из кодовых токенов goal…');
+    log('[files] ▸ сборка snippets из кодовых токенов goal…');
     const snippets = await collectSnippets(mcp, q);
 
-    console.log(`[files] ▸ cloud draft (${cloud.defaultModel})…`);
+    log(`[files] ▸ cloud draft (${cloud.defaultModel})…`);
     let draft: string;
     try {
       draft = await cloud.chat(
@@ -99,7 +106,7 @@ export async function runRefactor(goal: string, opts: { write: boolean }): Promi
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
       process.stderr.write(`[files] cloud draft failed: ${m.split('\n')[0].slice(0, 200)}\n`);
-      console.log(CLOUD_DOWN_MESSAGE);
+      log(CLOUD_DOWN_MESSAGE);
       return {
         targetPath: target.relPath,
         beforeBytes,
@@ -119,12 +126,12 @@ export async function runRefactor(goal: string, opts: { write: boolean }): Promi
         repoRoot,
         [target.relPath],
         async () => {
-          console.log(`[files] ▸ MCP file-server → file_write("${target.relPath}")`);
+          log(`[files] ▸ MCP file-server → file_write("${target.relPath}")`);
           await mcp.callToolText('file_write', { path: target.relPath, content: draft });
         },
         {
           onRestore: (reason) => {
-            console.log(`[files] ▸ typecheck FAILED (${reason}) → rollback (restore snapshot)…`);
+            log(`[files] ▸ typecheck FAILED (${reason}) → rollback (restore snapshot)…`);
           },
         },
       );
@@ -184,7 +191,8 @@ export interface ScaffoldResult {
  * fixup). Dry-run (default) → preview; --write → file_write под typecheck-rollback
  * (rollback = unlink нового файла).
  */
-export async function runScaffold(goal: string, opts: { write: boolean }): Promise<ScaffoldResult> {
+export async function runScaffold(goal: string, opts: { write: boolean } & LogOpts): Promise<ScaffoldResult> {
+  const log = opts.log ?? (() => {});
   const q = clean(goal, 1000);
   if (q.length === 0) throw new Error('пустая цель');
   const target = resolveScaffoldPath(q);
@@ -209,7 +217,7 @@ export async function runScaffold(goal: string, opts: { write: boolean }): Promi
 
   const cloud = makeRefineClient();
   if (!cloud) {
-    console.log(CLOUD_DOWN_MESSAGE);
+    log(CLOUD_DOWN_MESSAGE);
     return { targetPath: target.relPath, preview: '', created: false, cloudStatus: 'no-key' };
   }
 
@@ -217,7 +225,7 @@ export async function runScaffold(goal: string, opts: { write: boolean }): Promi
   const mcp = new McpStdioClient(command, args, undefined, false);
   try {
     await mcp.connect();
-    console.log(`[files] ▸ cloud draft (${cloud.defaultModel})…`);
+    log(`[files] ▸ cloud draft (${cloud.defaultModel})…`);
     let draft: string;
     try {
       draft = await cloud.chat(
@@ -227,7 +235,7 @@ export async function runScaffold(goal: string, opts: { write: boolean }): Promi
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
       process.stderr.write(`[files] cloud draft failed: ${m.split('\n')[0].slice(0, 200)}\n`);
-      console.log(CLOUD_DOWN_MESSAGE);
+      log(CLOUD_DOWN_MESSAGE);
       return {
         targetPath: target.relPath,
         preview: '',
@@ -242,12 +250,12 @@ export async function runScaffold(goal: string, opts: { write: boolean }): Promi
         repoRoot,
         [target.relPath],
         async () => {
-          console.log(`[files] ▸ MCP file-server → file_write("${target.relPath}")`);
+          log(`[files] ▸ MCP file-server → file_write("${target.relPath}")`);
           await mcp.callToolText('file_write', { path: target.relPath, content: draft });
         },
         {
           onRestore: (reason) => {
-            console.log(`[files] ▸ typecheck FAILED (${reason}) → rollback (unlink new file)…`);
+            log(`[files] ▸ typecheck FAILED (${reason}) → rollback (unlink new file)…`);
           },
         },
       );

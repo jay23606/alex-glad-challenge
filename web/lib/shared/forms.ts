@@ -301,14 +301,17 @@ export const digestGenerateSchema = z.object({
 export type DigestGenerateInput = z.infer<typeof digestGenerateSchema>;
 
 // PATCH /api/blogs/[slug] — настройка блога (имя, профиль голоса, TG-чат,
-// RSS-источники, пресет стиля). profile: имя из /chat-профилей или null (сброс).
-// sources: массив http(s)-URL (≤20); [] сбрасывает на дефолтные фиды (null в БД).
-// stylePreset: значения синхронны с core stylePreset.ts (shared не импортирует core).
+// RSS-источники, пресет стиля, per-blog промпты). profile: имя из /chat-профилей
+// или null (сброс). sources: массив http(s)-URL (≤20); [] сбрасывает на дефолтные
+// фиды (null в БД). stylePreset: значения синхронны с core stylePreset.ts (shared
+// не импортирует core). systemPrompt/contextPrompt: null или '' очищают значение.
 export const blogPatchSchema = z.object({
   name: z.string().trim().min(1, 'Имя обязательно').max(120).optional(),
   profile: z.string().trim().max(100).nullable().optional(),
   tgChatId: z.string().trim().max(100).nullable().optional(),
   stylePreset: z.enum(['default', 'antonov']).optional(),
+  systemPrompt: z.string().max(8000, 'System prompt: до 8000 символов').nullable().optional(),
+  contextPrompt: z.string().max(8000, 'Context prompt: до 8000 символов').nullable().optional(),
   sources: z
     .array(
       z
@@ -321,6 +324,38 @@ export const blogPatchSchema = z.object({
     .optional(),
 });
 export type BlogPatchInput = z.infer<typeof blogPatchSchema>;
+
+// POST /api/blogs/[slug]/posts — ручной/праздничный пост по теме (без RSS).
+// variants: 1..3 разных подачи; publishNow — реальная отправка первого варианта
+// в Telegram-канал блога (без него остаются черновики).
+export const blogTopicPostSchema = z.object({
+  topic: z.string().trim().min(3, 'Тема: минимум 3 символа').max(500, 'Тема: до 500 символов'),
+  comment: z.string().trim().max(1000, 'Комментарий: до 1000 символов').optional(),
+  variants: z.number().int().min(1).max(3).optional(),
+  publishNow: z.boolean().optional(),
+});
+export type BlogTopicPostInput = z.infer<typeof blogTopicPostSchema>;
+
+// PUT /api/blogs/[slug]/schedule — полная замена недельного расписания блога.
+// dayOfWeek: 0=Sunday .. 6=Saturday; timeLocal строго HH:MM; timezone — IANA
+// (core проверит Intl); variants 1..3; enabled=false оставляет слот в списке,
+// но не запускает его.
+export const blogScheduleEntrySchema = z.object({
+  dayOfWeek: z.number().int().min(0).max(6),
+  timeLocal: z
+    .string()
+    .trim()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Время: строго HH:MM'),
+  timezone: z.string().trim().min(1).max(64).optional(),
+  topic: z.string().trim().max(500, 'Тема: до 500 символов').optional(),
+  variants: z.number().int().min(1).max(3).optional(),
+  enabled: z.boolean().optional(),
+});
+export const blogScheduleSchema = z.object({
+  entries: z.array(blogScheduleEntrySchema).max(14, 'Расписание: не больше 14 слотов'),
+});
+export type BlogScheduleEntryInput = z.infer<typeof blogScheduleEntrySchema>;
+export type BlogScheduleUpdateInput = z.infer<typeof blogScheduleSchema>;
 
 // --- Day 36: admin-auth ---
 

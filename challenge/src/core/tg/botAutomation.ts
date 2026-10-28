@@ -13,14 +13,34 @@ export type AutomationCommandsSource = Pick<
 >;
 export type BlogListSource = Pick<BlogDb, 'listBlogs'>;
 
+export interface TopicPostRequest {
+  readonly topic: string;
+  readonly comment?: string;
+  readonly variants: number;
+  readonly publish: boolean;
+}
+
+export interface TopicPostResult {
+  readonly ids: number[];
+  readonly published: boolean;
+  readonly message: string;
+}
+
+export type WriteTopicPost = (blog: BlogRow, req: TopicPostRequest) => Promise<TopicPostResult>;
+
 export interface BotAutomationDeps {
   readonly automation: AutomationCommandsSource;
   readonly blogs: BlogListSource;
   readonly send: (chatId: string, text: string, replyTo?: number) => Promise<unknown>;
+  /** Генерация поста по теме (общий LlmClient и BlogDb из createTgAutomationRunner). */
+  readonly postTopic?: WriteTopicPost;
 }
 
 const AUTO_USAGE = 'Формат: /авто <блог> on|off|status|run (блог — slug или id; список: /блоги)';
 const AUTO_ACTIONS = ['on', 'off', 'status', 'run'] as const;
+const POST_USAGE =
+  'Формат: /пост <блог> [publish] <тема> [| комментарий]\n' +
+  'publish — сразу отправить в TG; без него создаётся черновик. Список блогов: /блоги';
 
 export class BotAutomationCommands {
   constructor(private readonly d: BotAutomationDeps) {}
@@ -90,6 +110,74 @@ export class BotAutomationCommands {
         );
         return;
       }
+    }
+  }
+
+  /**
+   * /пост <блог> [publish] <тема> [| комментарий] — разовый/праздничный пост.
+   * Без publish остаётся черновик; с publish первый вариант уходит в канал
+   * блога (fallback TG_CHAT_ID). Генерация делегируется WriteTopicPost, чтобы
+   * бот не создавал второй LLM-клиент.
+   */
+  async cmdPost(args: string, chatId: string, replyTo?: number): Promise<void> {
+    const words = args.trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) {
+      await this.d.send(chatId, POST_USAGE, replyTo);
+      return;
+    }
+    const blogRef = words.shift()!;
+    let publish = false;
+    if (['publish', 'опубликовать', 'публик'].includes((words[0] ?? '').toLowerCase())) {
+      publish = true;
+      words.shift();
+    }
+    const rest = words.join(' ').trim();
+    const sep = rest.indexOf('|');
+    const topic = (sep >= 0 ? rest.slice(0, sep) : rest).trim();
+    const comment = sep >= 0 ? rest.slice(sep + 1).trim() : '';
+    if (topic.length < 3) {
+      await this.d.send(chatId, POST_USAGE, replyTo);
+      return;
+    }
+
+    const blog = this.resolveBlog(blogRef);
+    if (!blog) {
+      await this.d.send(chatId, `Блог «${blogRef}» не найден. Список: /блоги`, replyTo);
+      return;
+    }
+    if (!this.d.postTopic) {
+      await this.d.send(chatId, 'Автоматизация не сконфигурирована.', replyTo);
+      return;
+    }
+
+    await this.d.send(
+      chatId,
+      `${publish ? 'Генерирую и публикую' : 'Генерирую черновик'} «${topic}» для «${blog.name}»…`,
+      replyTo,
+    );
+    try {
+      const result = await this.d.postTopic(blog, {
+        topic,
+        ...(comment ? { comment } : {}),
+        variants: 1,
+        publish,
+      });
+      const id = result.ids[0];
+      const tail = id !== undefined ? ` (#${id})` : '';
+      await this.d.send(
+        chatId,
+        result.published
+          ? `✅ «${blog.name}»: пост опубликован в TG${tail}.`
+          : `📝 «${blog.name}»: черновик создан${tail} — публикация не выполнялась.`,
+        replyTo,
+      );
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'post failed';
+      await this.d.send(
+        chatId,
+        `⚠️ «${blog.name}»: не удалось создать пост — ${redactRunError(reason)}`,
+        replyTo,
+      );
     }
   }
 

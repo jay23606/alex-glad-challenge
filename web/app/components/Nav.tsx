@@ -32,16 +32,20 @@ export default function Nav({ isAdmin = false }: { isAdmin?: boolean }) {
           <>
             <NavCoreLinks />
             <div className="flex items-center gap-3">
-              <div className="hidden font-mono text-xs text-dim sm:block">
+              {/* 640–1023px: блок статуса — главный виновник overflow строки h-14 →
+                  скрыт до lg, на lg+ сжат с обрезкой (модель — не критичная инфа).
+                  truncate стоит на внутреннем текстовом span: на блоке с inline-flex
+                  ребёнком ellipsis не рисуется (клип без «…»). */}
+              <div className="hidden max-w-[16rem] font-mono text-xs text-dim lg:block">
                 {model ? (
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="inline-block h-2 w-2 rounded-full bg-ok" />
-                    {model.provider} · {model.model}
+                  <span className="inline-flex max-w-full items-center gap-1.5">
+                    <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-ok" />
+                    <span className="truncate">{model.provider} · {model.model}</span>
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="inline-block h-2 w-2 rounded-full bg-dim" />
-                    no-key
+                  <span className="inline-flex max-w-full items-center gap-1.5">
+                    <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-dim" />
+                    <span className="truncate">no-key</span>
                   </span>
                 )}
               </div>

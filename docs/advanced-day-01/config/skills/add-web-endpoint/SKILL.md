@@ -5,6 +5,9 @@ description: Add a Next.js Route Handler in web/app/api with server-only, zod va
 
 # Add a web endpoint
 
+> **Historical (ADVANCED Day 1).** Superseded by `AGENTS.md` and
+> `.omp/skills/agent-profiles/`. Do not follow this copy.
+
 Use for any new `web/app/api/**/route.ts`.
 
 ## Steps

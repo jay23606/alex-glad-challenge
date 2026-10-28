@@ -28,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
@@ -38,15 +39,22 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import ru.memo7.artel.di.AppContainer
+import ru.memo7.artel.ui.components.isCompactLayout
 import ru.memo7.artel.ui.screens.assistant.AssistantScreen
 import ru.memo7.artel.ui.screens.automation.AutomationScreen
 import ru.memo7.artel.ui.screens.calendar.CalendarScreen
+import ru.memo7.artel.ui.screens.course.CourseDetailScreen
+import ru.memo7.artel.ui.screens.course.CourseScreen
+import ru.memo7.artel.ui.screens.chat.ChatScreen
+import ru.memo7.artel.ui.screens.chat.ChatsScreen
 import ru.memo7.artel.ui.screens.dashboard.DashboardScreen
+import ru.memo7.artel.ui.screens.gamification.GamificationScreen
 import ru.memo7.artel.ui.screens.notifications.NotificationsScreen
 import ru.memo7.artel.ui.screens.projects.ProjectDetailScreen
 import ru.memo7.artel.ui.screens.projects.ProjectsScreen
 import ru.memo7.artel.ui.screens.settings.SettingsScreen
 import ru.memo7.artel.ui.screens.support.SupportScreen
+import ru.memo7.artel.ui.screens.todos.TodosScreen
 
 object Routes {
     const val DASHBOARD = "dashboard"
@@ -57,16 +65,30 @@ object Routes {
     const val NOTIFICATIONS = "notifications"
     const val SUPPORT = "support"
     const val SETTINGS = "settings"
+    const val GAMIFICATION = "gamification"
+    const val TODOS = "todos"
+    const val COURSE = "course"
+    const val COURSE_DETAIL = "course/{slug}"
+    const val CHAT = "chat"
+    const val CHAT_DETAIL = "chat/{sessionId}"
     const val PROJECT_DETAIL = "project/{projectId}"
     fun projectDetail(id: Long) = "project/$id"
+    fun courseDetail(slug: String) = "course/$slug"
+    fun chatDetail(sessionId: String) = "chat/$sessionId"
 }
 
-private data class BottomItem(val route: String, val label: String, val icon: ImageVector)
+/** Полное [label] доступен TalkBack через contentDescription иконки; [shortLabel] рисуется. */
+private data class BottomItem(
+    val route: String,
+    val label: String,
+    val icon: ImageVector,
+    val shortLabel: String = label,
+)
 
 private val bottomItems = listOf(
     BottomItem(Routes.DASHBOARD, "Главная", Icons.Rounded.Home),
     BottomItem(Routes.PROJECTS, "Проекты", Icons.Rounded.Folder),
-    BottomItem(Routes.AUTOMATION, "Автоматизация", Icons.Rounded.Bolt),
+    BottomItem(Routes.AUTOMATION, "Автоматизация", Icons.Rounded.Bolt, shortLabel = "Авто"),
     BottomItem(Routes.CALENDAR, "Календарь", Icons.Rounded.CalendarMonth),
     BottomItem(Routes.ASSISTANT, "Ассистент", Icons.AutoMirrored.Rounded.Chat),
 )
@@ -95,6 +117,8 @@ fun ArtelRoot(container: AppContainer) {
                 ) {
                     bottomItems.forEach { item ->
                         val selected = currentRoute == item.route
+                        // Компактный экран/крупный шрифт: только иконка, полное имя в contentDescription (#121).
+                        val compact = isCompactLayout()
                         NavigationBarItem(
                             selected = selected,
                             onClick = {
@@ -104,8 +128,24 @@ fun ArtelRoot(container: AppContainer) {
                                     restoreState = true
                                 }
                             },
-                            icon = { Icon(item.icon, contentDescription = item.label) },
-                            label = { Text(item.label, style = MaterialTheme.typography.labelMedium) },
+                            icon = {
+                                Icon(
+                                    item.icon,
+                                    contentDescription = if (compact) item.label else null,
+                                )
+                            },
+                            label = if (compact) {
+                                null
+                            } else {
+                                {
+                                    Text(
+                                        item.shortLabel,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            },
                             alwaysShowLabel = true,
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = MaterialTheme.colorScheme.primary,
@@ -138,6 +178,10 @@ fun ArtelRoot(container: AppContainer) {
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                     onOpenSupport = { navController.navigate(Routes.SUPPORT) },
                     onOpenProjects = { navController.navigate(Routes.PROJECTS) },
+                    onOpenGamification = { navController.navigate(Routes.GAMIFICATION) },
+                    onOpenTodos = { navController.navigate(Routes.TODOS) },
+                    onOpenCourse = { navController.navigate(Routes.COURSE) },
+                    onOpenChat = { navController.navigate(Routes.CHAT) },
                 )
             }
             composable(Routes.PROJECTS) {
@@ -149,6 +193,24 @@ fun ArtelRoot(container: AppContainer) {
             composable(Routes.AUTOMATION) { AutomationScreen(container) }
             composable(Routes.CALENDAR) { CalendarScreen(container) }
             composable(Routes.ASSISTANT) { AssistantScreen(container) }
+            composable(Routes.CHAT) {
+                ChatsScreen(
+                    container = container,
+                    onBack = { navController.popBackStack() },
+                    onOpenSession = { sessionId -> navController.navigate(Routes.chatDetail(sessionId)) },
+                )
+            }
+            composable(
+                route = Routes.CHAT_DETAIL,
+                arguments = listOf(navArgument("sessionId") { type = NavType.StringType }),
+            ) { entry ->
+                val sessionId = entry.arguments?.getString("sessionId").orEmpty()
+                ChatScreen(
+                    container = container,
+                    sessionId = sessionId,
+                    onBack = { navController.popBackStack() },
+                )
+            }
             composable(Routes.NOTIFICATIONS) {
                 NotificationsScreen(container, onBack = { navController.popBackStack() })
             }
@@ -157,6 +219,30 @@ fun ArtelRoot(container: AppContainer) {
             }
             composable(Routes.SETTINGS) {
                 SettingsScreen(container, onBack = { navController.popBackStack() })
+            }
+            composable(Routes.GAMIFICATION) {
+                GamificationScreen(container, onBack = { navController.popBackStack() })
+            }
+            composable(Routes.TODOS) {
+                TodosScreen(container, onBack = { navController.popBackStack() })
+            }
+            composable(Routes.COURSE) {
+                CourseScreen(
+                    container = container,
+                    onOpenLesson = { slug -> navController.navigate(Routes.courseDetail(slug)) },
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable(
+                route = Routes.COURSE_DETAIL,
+                arguments = listOf(navArgument("slug") { type = NavType.StringType }),
+            ) { entry ->
+                val slug = entry.arguments?.getString("slug").orEmpty()
+                CourseDetailScreen(
+                    container = container,
+                    slug = slug,
+                    onBack = { navController.popBackStack() },
+                )
             }
             composable(
                 route = Routes.PROJECT_DETAIL,

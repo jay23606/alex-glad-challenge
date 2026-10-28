@@ -40,6 +40,9 @@ export class BotStore {
     mkdirSync(path.dirname(dbPath), { recursive: true });
     this.db = new DatabaseSync(dbPath);
     this.db.exec('PRAGMA journal_mode = WAL');
+    // Ждём освобождения блокировки, а не падаем «database is locked»: параллельно
+    // с tg-collect может работать сам бот (и наоборот) — тот же файл.
+    this.db.exec('PRAGMA busy_timeout = 30000');
     this.db.exec(SCHEMA);
     this.stateUpsert = this.db.prepare(
       `INSERT INTO tg_bot_state (key, value) VALUES (?, ?)

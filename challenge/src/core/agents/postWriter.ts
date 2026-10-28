@@ -6,7 +6,7 @@
 //   3. Структура промпта: system (роль + стиль) → few-shot → user (новость + правила).
 //   4. Длина жёстко контролируется: 100-500 символов, иначе LLM растягивает.
 
-import type { BlogDb, NewsRow, StyleSampleRow } from '../db.js';
+import { DEFAULT_BLOG_SLUG, type BlogDb, type NewsRow, type StyleSampleRow } from '../db.js';
 import type { LlmClient } from '../client.js';
 import { msg } from '../types.js';
 import type { ProfileManager } from '../profile.js';
@@ -31,35 +31,50 @@ export class PostWriter {
   ) {}
 
   async write(db: BlogDb, news: NewsRow, opts: WriteOptions = {}): Promise<WrittenPost> {
-    // Пресет стиля блога (blogs.style_preset) заменяет system-промпт целиком;
-    // few-shot style_samples для пресета пропускаем — промпт пресета самодостаточен.
+    const blog = opts.blogId != null ? db.getBlog(opts.blogId) : null;
+    // Легаси-дефолты (футбольный канал/@lookatfacts) допустимы только для блога
+    // по умолчанию или вызова без блога; остальные блоги без профиля получают
+    // своё имя и нейтральный стиль, а не чужой голос.
+    const legacyDefaults = !blog || blog.slug === DEFAULT_BLOG_SLUG;
+
+    // Приоритет system-промпта: явный per-blog → пресет → шаблон по профилю.
+    // Явный промпт самодостаточен: few-shot образцы к нему не подмешиваются.
+    const explicitPrompt = blog?.system_prompt?.trim() || null;
     const presetPrompt =
-      opts.blogId != null ? presetSystemPrompt(db.getStylePreset(opts.blogId)) : null;
-    const samples = presetPrompt ? [] : db.styleSamples(3, opts.blogId);
+      !explicitPrompt && opts.blogId != null
+        ? presetSystemPrompt(db.getStylePreset(opts.blogId))
+        : null;
+    const basePrompt = explicitPrompt ?? presetPrompt;
+    const samples = basePrompt ? [] : db.styleSamples(3, opts.blogId);
+    const contextPrompt = blog?.context_prompt?.trim() || null;
 
     // --- Извлекаем ВСЕ поля профиля ---
     const p = this.profile?.active;
-    const channel = p?.канал ?? 'Иди на факты глянь';
-    const topic = p?.тематика ?? `футбол: ФК «${p?.любимый_клуб ?? 'Челси'}»`;
-    const style = p?.стиль ?? 'ироничный, резкий, с подколами';
+    const channel = p?.канал ?? (blog ? blog.name : 'Иди на факты глянь');
+    const topic = p?.тематика ?? (legacyDefaults ? `футбол: ФК «${p?.любимый_клуб ?? 'Челси'}»` : blog?.name ?? '');
+    const style = p?.стиль ?? (legacyDefaults ? 'ироничный, резкий, с подколами' : 'живой, человеческий, без канцелярита');
     const emojiRule = p?.эмодзи ?? 'без эмодзи';
-    const signature = p?.подпись ?? '@lookatfacts';
+    const signature = p?.подпись ?? (legacyDefaults ? '@lookatfacts' : '');
     const lengthRule = p?.длина_постов ?? '100-500 символов';
     const formatRule = p?.формат_абзацев ?? '2-4 предложения на абзац';
     const taboos = p?.табу ?? 'без мата, без политики';
     const humor = p?.приемы_юмора ?? '';
     const language = p?.язык ?? 'русский';
+    const signatureLine = signature ? `- Подпись в конце: ${signature}\n` : '';
+    const contextBlock = contextPrompt
+      ? `\n\n=== КОНТЕКСТ БЛОГА (постоянные факты, аудитория и тон) ===\n${contextPrompt}`
+      : '';
 
     // --- System-промпт: роль + жёсткие правила стиля ---
-    // Пресет идёт поверх профиля: профиль продолжает давать канал/табу/подпись.
-    const system = presetPrompt
-      ? `${presetPrompt}
+    // Явный промпт/пресет идёт поверх профиля: профиль продолжает давать
+    // канал/табу/подпись. Context prompt добавляется в обоих режимах.
+    const system = basePrompt
+      ? `${basePrompt}
 
 КАНАЛ И ПРОФИЛЬ (обязательно):
 - Шапка поста: «${channel}: » (без даты/времени). Первый символ ответа — «${channel[0]}».
-- Подпись в конце: ${signature}
-- Табу: ${taboos}.
-- Язык: ${language}.`
+${signatureLine}- Табу: ${taboos}.
+- Язык: ${language}.${contextBlock}`
       : `Ты — автор Telegram-канала «${channel}» (${topic}).
 Ты пишешь ${style}. Язык: ${language}.
 
@@ -68,13 +83,12 @@ export class PostWriter {
 - ФОРМАТ: ${formatRule}.
 - Шапка поста: «${channel}: » (без даты/времени). Первый символ ответа — «${channel[0]}».
 - ЭМОДЗИ: ${emojiRule}.
-- Подпись в конце: ${signature}
-${humor ? `- ПРИЁМЫ ЮМОРА которые используй: ${humor}.` : ''}
+${signatureLine}${humor ? `- ПРИЁМЫ ЮМОРА которые используй: ${humor}.` : ''}
 - КАПСОМ выделять 1-2 ключевых слова для акцента (не весь текст).
 - Риторические вопросы, разговорная речь.
 - Не выдумывай факты, которых нет в источнике.
 - Не обрезай пост на полуслове.
-- ${taboos}.`;
+- ${taboos}.${contextBlock}`;
 
     // --- Few-shot: примеры реальных постов (главный учитель стиля) ---
     const fewShotBlock = samples.length > 0
@@ -126,7 +140,7 @@ ${topicBlock}${commentBlock}
   }
 }
 
-function cleanPost(raw: string, channel = 'Иди на факты глянь'): string {
+export function cleanPost(raw: string, channel = 'Иди на факты глянь'): string {
   let s = raw.trim();
   // Убираем markdown-обёртку.
   s = s.replace(/^```[\s\S]*?\n/, '').replace(/\n```$/, '');

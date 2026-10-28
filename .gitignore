@@ -48,7 +48,7 @@ web/playwright-report/
 *.log
 
 # Артефакты оркестратора (CLAUDE.md)
-swarm-report/
+# (swarm-report/ уже перечислен выше)
 
-# Профиль «Граф проекта»: knowledge-graph от graphify (AGENTS.md §13.6)
+# Профиль «Граф проекта»: knowledge-graph от graphify (AGENTS.md §13.1, project-graph)
 graphify-out/

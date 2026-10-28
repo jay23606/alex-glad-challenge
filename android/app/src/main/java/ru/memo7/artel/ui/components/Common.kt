@@ -45,32 +45,44 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import ru.memo7.artel.core.UiState
 import ru.memo7.artel.ui.theme.ArtelShapes
+
+/** Компактный контекст: узкий экран или крупный системный шрифт (#121, #126, #127). */
+@Composable
+internal fun isCompactLayout(): Boolean =
+    LocalConfiguration.current.screenWidthDp < 360 || LocalDensity.current.fontScale >= 1.2f
 
 /** Oversized screen header used across screens. */
 @Composable
 fun ScreenTitle(text: String, modifier: Modifier = Modifier, accentWord: String? = null) {
     Column(modifier = modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
         if (accentWord != null) {
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    text = accentWord,
-                    style = MaterialTheme.typography.displayLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Text(
-                    text = " $text",
-                    style = MaterialTheme.typography.displayLarge,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            // Один абзац: длинное слово-суффикс переносится целиком; на компактных
+            // экранах/крупном шрифте даём третью строку, многоточие — последнее средство (#126).
+            val colors = MaterialTheme.colorScheme
+            val annotated = remember(accentWord, text, colors.primary, colors.onBackground) {
+                buildAnnotatedString {
+                    withStyle(SpanStyle(color = colors.primary)) { append(accentWord) }
+                    append(" $text")
+                }
             }
+            Text(
+                text = annotated,
+                style = MaterialTheme.typography.displayLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = if (isCompactLayout()) 3 else 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         } else {
             Text(
                 text = text,
@@ -154,16 +166,22 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier, dotColor: Color = 
     }
 }
 
-/** Small pill badge. */
+/** Small pill badge; override [containerColor]/[contentColor] for high-contrast pairs. */
 @Composable
-fun PillBadge(text: String, tint: Color, modifier: Modifier = Modifier) {
+fun PillBadge(
+    text: String,
+    tint: Color,
+    modifier: Modifier = Modifier,
+    containerColor: Color = tint.copy(alpha = 0.16f),
+    contentColor: Color = tint,
+) {
     Box(
         modifier = modifier
             .clip(ArtelShapes.pill)
-            .background(tint.copy(alpha = 0.16f))
+            .background(containerColor)
             .padding(horizontal = 10.dp, vertical = 4.dp)
     ) {
-        Text(text, style = MaterialTheme.typography.labelMedium, color = tint)
+        Text(text, style = MaterialTheme.typography.labelMedium, color = contentColor)
     }
 }
 

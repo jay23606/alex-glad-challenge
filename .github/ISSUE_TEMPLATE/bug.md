@@ -30,7 +30,7 @@ assignees: ''
 
 ## Профиль
 
-<!-- Бизнес-фича §13.3 | Поиск бага §13.4 | Research §13.5 | Граф проекта §13.6 -->
+<!-- business-feature | bug-search | research | project-graph — см. .omp/skills/agent-profiles/references/selection.md -->
 
 ## Источник
 

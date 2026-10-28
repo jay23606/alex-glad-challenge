@@ -117,3 +117,54 @@ test('pipeline: default-блог — ANTONOV-маркера в writer-промп
     safeRm(dir);
   }
 });
+
+test('pipeline: без log — консоль молчит (issue #142, прогресс уходит только в инъекцию)', async (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'pipeline-silent-'));
+  const db = new BlogDb(path.join(dir, 'blog.sqlite'));
+  const consoleCalls: string[] = [];
+  t.mock.method(console, 'log', (...args: unknown[]) => {
+    consoleCalls.push(args.map(String).join(' '));
+  });
+  try {
+    const stored = db.getBlogBySlug(DEFAULT_BLOG_SLUG)!;
+    db.insertNews(NEWS_ROW, stored.id);
+
+    const result = await runNewsPipeline(db, fakeClient([]), {
+      blog: { ...stored, sources: OFFLINE_SOURCES },
+    });
+
+    assert.ok(result.post, 'пост должен быть написан');
+    assert.deepEqual(consoleCalls, [], 'runNewsPipeline без log не должен шуметь в console.log');
+  } finally {
+    db.close();
+    safeRm(dir);
+  }
+});
+
+test('pipeline: инъецированный log получает прогресс-строки, console.log чист', async (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'pipeline-log-'));
+  const db = new BlogDb(path.join(dir, 'blog.sqlite'));
+  const lines: string[] = [];
+  const consoleCalls: string[] = [];
+  t.mock.method(console, 'log', (...args: unknown[]) => {
+    consoleCalls.push(args.map(String).join(' '));
+  });
+  try {
+    const stored = db.getBlogBySlug(DEFAULT_BLOG_SLUG)!;
+    db.insertNews(NEWS_ROW, stored.id);
+
+    const result = await runNewsPipeline(db, fakeClient([]), {
+      blog: { ...stored, sources: OFFLINE_SOURCES },
+      log: (line) => lines.push(line),
+    });
+
+    assert.ok(result.post);
+    assert.ok(lines.some((l) => l.includes('[pipeline] Агент 1:')), 'этап 1 должен логироваться');
+    assert.ok(lines.some((l) => l.includes('[pipeline] Агент 2:')), 'этап 2 должен логироваться');
+    assert.ok(lines.some((l) => l.includes('[pipeline] Агент 3:')), 'этап 3 должен логироваться');
+    assert.deepEqual(consoleCalls, [], 'при инъекции console.log всё равно остаётся чистым');
+  } finally {
+    db.close();
+    safeRm(dir);
+  }
+});

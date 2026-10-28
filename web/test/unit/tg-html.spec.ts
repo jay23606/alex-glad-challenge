@@ -1,6 +1,6 @@
 // Unit: whitelist-парсер Telegram-HTML (клиентский превью + серверный sanitize).
 import { describe, expect, it } from 'vitest';
-import { sanitizeTgHtml, tgHtmlToPlain } from '../../lib/shared/tg-html';
+import { sanitizeTgHtml, tgHtmlToPlain, tgVisibleText } from '../../lib/shared/tg-html';
 
 describe('sanitizeTgHtml', () => {
   it.each([
@@ -78,5 +78,33 @@ describe('tgHtmlToPlain', () => {
 
   it('экранированные теги остаются текстом', () => {
     expect(tgHtmlToPlain(sanitizeTgHtml('<script>x</script>'))).toBe('<script>x</script>');
+  });
+});
+
+describe('tgVisibleText', () => {
+  it('HTML: литеральные уголки в тексте сохраняются (не вырезаются как «тег»)', () => {
+    expect(tgVisibleText('5 < 10 > 3')).toBe('5 < 10 > 3');
+  });
+
+  // Контракт confirm-превью постов блога (blog/posts/[id]): черновик содержит
+  // и разрешённую разметку, и литеральные уголки — снимается одно, второе видно.
+  it('HTML: разметка снимается, литеральные уголки рядом сохраняются', () => {
+    expect(tgVisibleText('<b>итог</b>: 5 < 10 > 3')).toBe('итог: 5 < 10 > 3');
+  });
+
+  it('HTML: разрешённая разметка снимается', () => {
+    expect(tgVisibleText('<b>x</b>')).toBe('x');
+  });
+
+  it('HTML: запрещённый <script> остаётся видимым текстом', () => {
+    expect(tgVisibleText('hi <script>alert(1)</script>')).toBe('hi <script>alert(1)</script>');
+  });
+
+  it('none: строка возвращается как есть — разметка литеральная по контракту', () => {
+    expect(tgVisibleText('<b>x</b> 5 < 10', 'none')).toBe('<b>x</b> 5 < 10');
+  });
+
+  it('дефолт — HTML (совпадает с эффективным parse mode composer/publish)', () => {
+    expect(tgVisibleText('<i>y</i>')).toBe(tgVisibleText('<i>y</i>', 'HTML'));
   });
 });

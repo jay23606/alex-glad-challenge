@@ -5,6 +5,9 @@ description: Add or change a reusable service in challenge/src/core without leak
 
 # Add a core service
 
+> **Historical (ADVANCED Day 1).** Superseded by `AGENTS.md` and
+> `.omp/skills/agent-profiles/`. Do not follow this copy.
+
 Use for logic shared by CLI, REPL, agents, and web.
 
 ## Steps

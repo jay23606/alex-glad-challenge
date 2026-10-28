@@ -297,14 +297,9 @@ export interface MaximBotConfig {
   /** Календарь релизов: дата первого релиза (YYYY-MM-DD) и период в днях. */
   releaseEpoch: string;
   releasePeriodDays: number;
-  /** Окно напутствия в обычный день (часы локального времени). */
+  /** Окно напутствия в день релиза (часы локального времени, случайный момент). */
   dailyWindowStartHour: number;
   dailyWindowEndHour: number;
-  /** Интервал напутствий в обычные дни (дней; в релизные — hotInterval). */
-  normalIntervalDays: number;
-  /** Интервал напутствий в день релиза и на следующий (минуты, min–max). */
-  hotIntervalMinMin: number;
-  hotIntervalMaxMin: number;
 }
 
 export function getMaximBotConfig(): MaximBotConfig | null {
@@ -328,9 +323,6 @@ export function getMaximBotConfig(): MaximBotConfig | null {
     releasePeriodDays: Math.max(1, num('MAXIM_RELEASE_PERIOD_DAYS', 14)),
     dailyWindowStartHour: num('MAXIM_DAILY_WINDOW_START', 10),
     dailyWindowEndHour: num('MAXIM_DAILY_WINDOW_END', 20),
-    normalIntervalDays: Math.max(1, num('MAXIM_NORMAL_INTERVAL_DAYS', 3)),
-    hotIntervalMinMin: Math.max(1, num('MAXIM_HOT_INTERVAL_MIN', 60)),
-    hotIntervalMaxMin: Math.max(1, num('MAXIM_HOT_INTERVAL_MAX', 180)),
   };
 }
 

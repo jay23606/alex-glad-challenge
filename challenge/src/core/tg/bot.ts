@@ -84,7 +84,7 @@ const START_INTRO = [
   'Играем в самом чате «Факты в чате» — там я и обитаю.',
 ].join('\n');
 const START_INTRO_OWNER =
-  '\n\nТвои админские: /stat, /alias, /aliasscan, /reindex, /off, /on (кириллицей: /стат, /алиас, /алиасскан). Никому не говори.';
+  '\n\nТвои админские: /stat, /alias, /aliasscan, /reindex, /off, /on, /блоги, /авто, /пост (кириллицей: /стат, /алиас, /алиасскан). Никому не говори.';
 
 export interface RunTgBotOpts {
   /** Собрать/доклеить FTS-индекс и выйти (без сети). */
@@ -193,6 +193,7 @@ export async function runTgBot(opts: RunTgBotOpts = {}): Promise<void> {
   const automationCommands = new BotAutomationCommands({
     automation: automationRunner.automation,
     blogs: automationRunner.blogs,
+    postTopic: automationRunner.writeTopicPost,
     send: (chatId, text, replyTo) => queue.enqueue({ chatId, text, replyTo }),
   });
 
@@ -577,6 +578,12 @@ export class MediumBot {
           return;
         }
         return this.d.automationCommands.cmdAuto(cmd.args, ctx.chatId, ctx.replyTo);
+      case 'пост':
+        if (!this.d.automationCommands) {
+          await this.reply(ctx.chatId, 'Автоматизация не сконфигурирована.', ctx.replyTo);
+          return;
+        }
+        return this.d.automationCommands.cmdPost(cmd.args, ctx.chatId, ctx.replyTo);
       default:
         return;
     }

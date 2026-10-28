@@ -10,6 +10,7 @@ import okhttp3.Response
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import ru.memo7.artel.data.api.ArtelApi
+import ru.memo7.artel.data.api.ArtelAuthApi
 import java.util.concurrent.TimeUnit
 
 /** Adds the bearer token from the current credentials to every /api request. */
@@ -47,5 +48,20 @@ object ApiFactory {
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
             .create(ArtelApi::class.java)
+    }
+
+    /** Client for api/mobile/login: no Authorization header — the token does not exist yet. */
+    fun createAuth(baseUrl: String): ArtelAuthApi {
+        val client = OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+
+        return Retrofit.Builder()
+            .baseUrl(ru.memo7.artel.data.normalizeBaseUrl(baseUrl))
+            .client(client)
+            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .build()
+            .create(ArtelAuthApi::class.java)
     }
 }

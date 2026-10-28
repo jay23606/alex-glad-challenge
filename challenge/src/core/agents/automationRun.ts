@@ -43,7 +43,7 @@ export interface AutomationRunner {
  * инстансы смешивал бы голоса при параллельных runBlog разных блогов
  * (writer читает profile.active после await'ов конвейера).
  */
-function loadBlogProfile(
+export function loadBlogProfile(
   profileDir: string | undefined,
   blog: BlogRow,
 ): ProfileManager | null {

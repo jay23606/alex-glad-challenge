@@ -34,6 +34,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -53,9 +55,11 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import ru.memo7.artel.core.UiState
 import ru.memo7.artel.core.network.ApiResult
@@ -69,6 +73,8 @@ import ru.memo7.artel.ui.components.StateContainer
 import ru.memo7.artel.ui.theme.ArtelShapes
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -94,23 +100,53 @@ class ProjectDetailViewModel(
     private val _createState = MutableStateFlow<CreateItemState>(CreateItemState.Idle)
     val createState: StateFlow<CreateItemState> = _createState.asStateFlow()
 
+    /** Одноразовые сообщения для snackbar-хоста; канал не теряет повторы. */
+    private val _messages = Channel<String>(Channel.BUFFERED)
+    val messages = _messages.receiveAsFlow()
+
+    /** Items with a pending toggle PATCH: повторный тап игнорируется до ответа. */
+    private val pendingToggles = mutableSetOf<Long>()
+
     init { refresh() }
 
     fun refresh() {
         viewModelScope.launch {
             when (val result = repository.items(projectId)) {
                 is ApiResult.Success -> _state.value = UiState.Success(ProjectDetailUiState(result.data.items))
-                is ApiResult.Failure -> _state.value = UiState.Error(result.error.message ?: "Ошибка")
+                is ApiResult.Failure -> {
+                    val message = result.error.message ?: "Ошибка"
+                    // Экран с данными не роняем из-за транзиентного сбоя обновления.
+                    if (_state.value is UiState.Success) {
+                        _messages.send("Не удалось обновить: $message")
+                    } else {
+                        _state.value = UiState.Error(message)
+                    }
+                }
             }
         }
     }
 
     fun toggleDone(item: WorkspaceItemDto, done: Boolean) {
-        // Optimistic update; roll back on failure.
+        // Guard: повторный тап, пока PATCH в полёте, игнорируем — иначе ответы
+        // могут примениться не по порядку.
+        synchronized(pendingToggles) {
+            if (item.id in pendingToggles) return
+            pendingToggles += item.id
+        }
+        // Optimistic update; on failure roll back and show the error, on
+        // success re-read the list (сервер по умолчанию скрывает done).
         applyDone(item.id, done)
         viewModelScope.launch {
-            if (repository.setItemDone(item.id, done) is ApiResult.Failure) {
-                applyDone(item.id, !done)
+            try {
+                when (val result = repository.setItemDone(item.id, done)) {
+                    is ApiResult.Success -> refresh()
+                    is ApiResult.Failure -> {
+                        applyDone(item.id, !done)
+                        _messages.send(result.error.message ?: "Не удалось обновить запись")
+                    }
+                }
+            } finally {
+                synchronized(pendingToggles) { pendingToggles -= item.id }
             }
         }
     }
@@ -153,9 +189,18 @@ private val ruDayFormat = DateTimeFormatter.ofPattern("d MMMM, EEEE", Locale("ru
 
 internal fun parseApiDate(raw: String?): LocalDateTime? {
     if (raw.isNullOrBlank()) return null
-    return runCatching { OffsetDateTime.parse(raw).toLocalDateTime() }
-        .recoverCatching { LocalDateTime.parse(raw.take(19)) }
-        .getOrNull()
+    // ISO со смещением: «настенное» время берём как есть (паритет с web).
+    runCatching { OffsetDateTime.parse(raw) }.getOrNull()?.let { return it.toLocalDateTime() }
+    // ISO-local без зоны — как есть.
+    runCatching { LocalDateTime.parse(raw) }.getOrNull()?.let { return it }
+    // SQLite datetime('now') хранит UTC «yyyy-MM-dd HH:mm:ss» (пробел вместо
+    // ISO 'T') — приводим момент к локальной зоне устройства.
+    return runCatching {
+        LocalDateTime.parse(raw.take(19).replace(' ', 'T'))
+            .atOffset(ZoneOffset.UTC)
+            .atZoneSameInstant(ZoneId.systemDefault())
+            .toLocalDateTime()
+    }.getOrNull()
 }
 
 internal fun formatRuDate(raw: String?): String =
@@ -170,6 +215,7 @@ fun ProjectDetailScreen(container: AppContainer, projectId: Long, onBack: () -> 
     )
     val state by vm.state.collectAsStateWithLifecycle()
     val createState by vm.createState.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
     var showCreate by remember { mutableStateOf(false) }
 
     LaunchedEffect(createState) {
@@ -179,8 +225,15 @@ fun ProjectDetailScreen(container: AppContainer, projectId: Long, onBack: () -> 
         }
     }
 
+    LaunchedEffect(Unit) {
+        vm.messages.collect { message ->
+            snackbarHostState.showSnackbar(message = message, withDismissAction = true)
+        }
+    }
+
     Scaffold(
         containerColor = Color.Transparent,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             FloatingActionButton(
                 onClick = { showCreate = true },

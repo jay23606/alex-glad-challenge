@@ -1,7 +1,8 @@
 // Тесты общей фабрики блог-автоматизации (#78): pipeline + профиль голоса +
 // публикация по auto_publish — общий код web- и TG-адаптеров. Сеть вырезана
 // существующими seams: мёртвый loopback-RSS (паттерн pipeline.test.ts),
-// fake-LLM (паттерн postWriter.test.ts), publish инжектится.
+// fake-LLM (паттерн postWriter.test.ts), publish инжектится; дефолтный publish
+// (publishPost) проверяется стабом глобального fetch на границе сети.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -147,7 +148,68 @@ test('runBlog: auto_publish=1 — публикация с контентом п�
   }
 });
 
-test('runBlog: ошибка публикации пробрасывается — BlogAutomation запишет failed run', async () => {
+// Дефолтный publish (без инжекта): publishPost → Bot API через глобальный fetch.
+// Стаб на границе сети: /sendMessage отвечает фейком Telegram API, остальные
+// вызовы (мёртвый loopback-RSS) уходят в настоящий fetch и падают мгновенно —
+// тот же офлайн-паттерн, что у тестов с инжектом. Если бы дефолт не вызывался
+// (например, publish обязателен или потерян), sendMessage не был бы вызван.
+test('runBlog без инжекта publish: дефолт публикует в TG блога через sendMessage', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'automation-run-'));
+  const db = new BlogDb(path.join(dir, 'blog.sqlite'));
+  const originalFetch = globalThis.fetch;
+  const originalToken = process.env.TG_BOT_TOKEN;
+  const originalProxy = process.env.HTTPS_PROXY;
+  try {
+    const blog = defaultBlog(db);
+    const chatId = '-100888';
+    db.updateBlog(blog.id, { sources: OFFLINE_SOURCES, tg_chat_id: chatId, profile: null });
+    db.insertNews(NEWS_ROW, blog.id);
+
+    const sendMessageCalls: { url: string; body: Record<string, unknown> }[] = [];
+    const fetchStub: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes('/sendMessage')) {
+        sendMessageCalls.push({ url, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+        return new Response(JSON.stringify({ ok: true, result: { message_id: 77 } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return originalFetch(input, init);
+    };
+    globalThis.fetch = fetchStub;
+
+    process.env.TG_BOT_TOKEN = 'vitest-fake-bot-token';
+    delete process.env.HTTPS_PROXY; // прокси-first увёл бы запрос из-под стаба в ProxyAgent
+
+    const runner = createAutomationRunner({
+      blogDb: db,
+      client: fakeClient([]),
+      getRule: () => ruleOf(blog.id, 1),
+      // publish НЕ инжектится — проверяется продовый дефолт (publishPost).
+    });
+
+    const outcome = await runner.runBlog(blog.id);
+    assert.equal(outcome.message, 'Пост создан и опубликован в TG');
+    assert.equal(sendMessageCalls.length, 1, 'ровно один запрос в Bot API');
+    const call = sendMessageCalls[0];
+    assert.ok(call, 'запрос sendMessage не зафиксирован');
+    assert.ok(call.url.includes('/sendMessage'), 'эндпоинт — sendMessage Bot API');
+    assert.equal(call.body['chat_id'], Number(chatId), 'chat_id — из blogs.tg_chat_id блога');
+    assert.equal(call.body['parse_mode'], 'HTML', 'parse_mode HTML из дефолта');
+    assert.ok(String(call.body['text']).includes('@lookatfacts'), 'публикуется контент поста');
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalToken === undefined) delete process.env.TG_BOT_TOKEN;
+    else process.env.TG_BOT_TOKEN = originalToken;
+    if (originalProxy === undefined) delete process.env.HTTPS_PROXY;
+    else process.env.HTTPS_PROXY = originalProxy;
+    db.close();
+    safeRm(dir);
+  }
+});
+
+test('runBlog: ошибка публикации пробрасывается наружу', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'automation-run-'));
   const db = new BlogDb(path.join(dir, 'blog.sqlite'));
   try {

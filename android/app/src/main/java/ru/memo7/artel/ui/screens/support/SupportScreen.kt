@@ -23,6 +23,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,6 +56,7 @@ data class SupportUiState(
     val results: List<FaqItemDto> = emptyList(),
     val searching: Boolean = false,
     val searched: Boolean = false,
+    val searchError: String? = null,
     val ticketBusy: Boolean = false,
     val ticketDone: Long? = null,
     val ticketError: String? = null,
@@ -71,17 +73,42 @@ class SupportViewModel(private val repository: ArtelRepository) : ViewModel() {
         _state.update { it.copy(query = value) }
         searchJob?.cancel()
         if (value.isBlank()) {
-            _state.update { it.copy(results = emptyList(), searched = false, searching = false) }
+            _state.update { it.copy(results = emptyList(), searched = false, searching = false, searchError = null) }
             return
         }
         searchJob = viewModelScope.launch {
             delay(350) // debounce typing
-            _state.update { it.copy(searching = true) }
-            val found = when (val result = repository.faq(value.trim())) {
-                is ApiResult.Success -> result.data.results
-                is ApiResult.Failure -> emptyList()
+            search(value.trim())
+        }
+    }
+
+    /** Повтор последнего FAQ-запроса после ошибки — без debounce. */
+    fun retrySearch() {
+        searchJob?.cancel()
+        val query = _state.value.query.trim()
+        if (query.isNotEmpty()) viewModelScope.launch { search(query) }
+    }
+
+    private suspend fun search(query: String) {
+        _state.update { it.copy(searching = true, searchError = null) }
+        try {
+            when (val result = repository.faq(query)) {
+                is ApiResult.Success -> _state.update {
+                    it.copy(results = result.data.results, searched = true, searchError = null)
+                }
+                is ApiResult.Failure -> _state.update {
+                    // Ошибка запроса — не «ничего не найдено»: показываем её отдельно.
+                    it.copy(
+                        results = emptyList(),
+                        searched = true,
+                        searchError = result.error.message ?: "Не удалось выполнить поиск",
+                    )
+                }
             }
-            _state.update { it.copy(results = found, searching = false, searched = true) }
+        } finally {
+            // Сбрасываем флаг даже при отмене (новый запрос вытеснил текущий) —
+            // иначе поиск навсегда остаётся в «Ищем…».
+            _state.update { it.copy(searching = false) }
         }
     }
 
@@ -150,6 +177,18 @@ fun SupportScreen(container: AppContainer, onBack: () -> Unit) {
                     modifier = Modifier.padding(horizontal = 20.dp),
                 )
             }
+            state.searchError != null -> item {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+                    Text(
+                        "Не удалось выполнить поиск: ${state.searchError}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    TextButton(onClick = vm::retrySearch) {
+                        Text("Повторить")
+                    }
+                }
+            }
             state.searched && state.results.isEmpty() -> item {
                 Text(
                     "Ничего не найдено — задайте вопрос через обращение ниже.",
@@ -192,6 +231,15 @@ private fun TicketSection(vm: SupportViewModel, state: SupportUiState) {
     var body by remember { mutableStateOf("") }
     var contact by remember { mutableStateOf("") }
     var formVisible by remember { mutableStateOf(false) }
+
+    // После успешного создания поля очищаются, success-сообщение остаётся (#125).
+    LaunchedEffect(state.ticketDone) {
+        if (state.ticketDone != null) {
+            subject = ""
+            body = ""
+            contact = ""
+        }
+    }
 
     Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
         Text("Не нашли ответ?", style = MaterialTheme.typography.titleLarge)

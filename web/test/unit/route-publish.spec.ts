@@ -180,16 +180,24 @@ describe('POST /api/telegram/publish', () => {
     expect(mocks.notifyAdd.mock.calls[0][0].body).toBe('a < b');
   });
 
-  it('notification body matches Telegram-visible text for HTML and none', async () => {
+  it('уведомление post_published: литеральные уголки в тексте не вырезаются', async () => {
     publishToTelegram.mockResolvedValue({ ok: true, messageId: 13 });
-    const session = `admin_session=${createSessionValue()}`;
+    const res = await POST(req({ text: '5 < 10 > 3' }, `admin_session=${createSessionValue()}`));
 
-    await POST(req({ text: '5 < 10 > 3' }, session));
+    expect(res.status).toBe(200);
+    // Слепой strip посчитал бы «< 10 >» тегом и вырезал его; tgVisibleText — нет.
     expect(mocks.notifyAdd.mock.calls[0][0].body).toBe('5 < 10 > 3');
+  });
 
-    mocks.notifyAdd.mockClear();
-    await POST(req({ text: '<b>5 < 10 > 3</b>', parseMode: 'none' }, session));
-    expect(mocks.notifyAdd.mock.calls[0][0].body).toBe('<b>5 < 10 > 3</b>');
+  it('уведомление post_published: parseMode none — тело = сырой текст без обработки', async () => {
+    publishToTelegram.mockResolvedValue({ ok: true, messageId: 14 });
+    const res = await POST(
+      req({ text: '<b>сырый</b> 5 < 10', parseMode: 'none' }, `admin_session=${createSessionValue()}`),
+    );
+
+    expect(res.status).toBe(200);
+    expect(publishToTelegram).toHaveBeenCalledWith('<b>сырый</b> 5 < 10', 'manual', undefined, 'none');
+    expect(mocks.notifyAdd.mock.calls[0][0].body).toBe('<b>сырый</b> 5 < 10');
   });
 
   it('parseMode none пробрасывается', async () => {

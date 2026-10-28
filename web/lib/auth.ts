@@ -79,7 +79,8 @@ export function requireAuth(req: NextRequest): NextResponse | null {
   );
 }
 
-/** Мобильный клиент: Bearer MOBILE_API_TOKEN. Наружу — только Boolean. */
+/** Статический Bearer-токен автоматизации/скриптов. Приложение Артель его не
+ * использует: оно получает session-токен через /api/mobile/login. Наружу — только Boolean. */
 export function isMobileApiConfigured(): boolean {
   const t = process.env.MOBILE_API_TOKEN?.trim();
   return t !== undefined && t.length > 0;
@@ -93,12 +94,15 @@ function isValidMobileToken(value: string | null | undefined): boolean {
   return timingSafeEq(value, expected);
 }
 
-/** Извлекает и проверяет Authorization: Bearer из запроса. */
+/** Извлекает и проверяет Authorization: Bearer из запроса: подписанная session-строка
+ * (выдаётся /api/auth/login и /api/mobile/login) либо статический MOBILE_API_TOKEN
+ * (автоматизация; сравнение timing-safe). Наружу — только Boolean. */
 export function isMobileAuthed(req: NextRequest): boolean {
   const header = req.headers.get('authorization') ?? '';
   const match = /^Bearer\s+(.+)$/i.exec(header);
   if (!match) return false;
-  return isValidMobileToken(match[1].trim());
+  const token = match[1].trim();
+  return isValidSession(token) || isValidMobileToken(token);
 }
 
 /** Второй auth-слой для API: cookie-сессия ИЛИ мобильный Bearer-токен. */

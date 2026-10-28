@@ -3,6 +3,15 @@
 #   cp docs/advanced-day-04/continue-config.yaml ~/.continue/config.yaml
 # Требования: Ollama на 127.0.0.1:11434; модели qwen2.5-coder:7b (чат) и
 # qwen2.5-coder:1.5b-base (FIM-автокомплит).
+#
+# ВАЖНО:
+# 1. Каждая модель в этом файле должна иметь ЯВНЫЙ contextLength.
+#    Без него Ollama/Continue.dev используют маленький дефолт (2048–8192),
+#    и при подключенных rules + codebase будет "Message exceeds context limit".
+# 2. Путь в rules: должен быть либо абсолютным, либо лежать в ~/.continue/rules/.
+#    Относительный путь из корня проекта Continue.dev не резолвит.
+# 3. Если добавляешь свои модели (Llama, DeepSeek и т.д.), обязательно
+#    пропиши им contextLength, иначе получишь ту же ошибку.
 
 name: Alex-Glad Challenge Local Assistant
 version: 1.0.0
@@ -25,6 +34,7 @@ models:
       # ЯВНЫЙ num_ctx: Ollama молча режет хвост длинного промпта (известная
       # ГОТЧА репозитория). 16k — комфортно для 7b Q4 на 16GB RAM.
       contextLength: 16384
+      maxTokens: 4096
 
   # Автокомплит — малая BASE-модель с FIM-токенами: латентность важнее глубины.
   - name: qwen2.5-coder-1.5b-base-autocomplete
@@ -38,12 +48,17 @@ models:
       topP: 0.9
       # Автокомплит на коротком окне — быстрее и без лишнего шума.
       contextLength: 4096
+      maxTokens: 256
 
 # Правила проекта — в системный промпт чата/edit (см. rules-agents-short.md).
+# Живая установка: скопировать файл в ~/.continue/rules/ и указать абсолютный
+# путь или имя файла относительно ~/.continue/rules/.
 rules:
-  - docs/advanced-day-04/rules-agents-short.md
+  - ~/.continue/rules/alex-glad-challenge.md
 
-# Контекст, который модель видит к запросу:
+# Контекст, который модель видит к запросу.
+# Если продолжает падать по context limit — уменьши nRetrieve/nFinal или
+# убери provider: codebase, оставив только code + file (AGENTS.md, RULES.md).
 context:
   # Текущий файл + соседние по импортам (стандартный provider code).
   - provider: code
@@ -55,9 +70,10 @@ context:
     options:
       path: .omp/RULES.md
   # Структура core — куда чаще всего нужно заглядывать.
+  # nRetrieve/nFinal уменьшены, чтобы укладываться в 16k вместе с rules.
   - provider: codebase
     options:
-      nRetrieve: 25
-      nFinal: 8
+      nRetrieve: 12
+      nFinal: 4
 # Не подключаем: docs/ (RSS-обучающие корпуса), terminal, localhost-провайдеры —
 # меньше шума для 7b, меньше расхода контекста.

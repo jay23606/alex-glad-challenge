@@ -641,6 +641,47 @@ describe('DELETE /api/integrations/inbound/[id]', () => {
   });
 });
 
+// #109: у DELETE тот же гейт валидности id, что у POST (см. #92 выше): middleware
+// пропускает любую цифровую строку, поэтому гейт обязан жить в роуте — после auth,
+// но до БД. Number(id) должен быть целым > 0: id=0 и переполнение до Infinity → 400;
+// конечное гигантское (1e20 — целое) проходит гейт и уходит в БД → 404 «hook not found».
+describe('DELETE [id]: граница валидности id (#109)', () => {
+  function rawIdReq(id: string): { req: NextRequest; ctx: { params: Promise<{ id: string }> } } {
+    return {
+      req: new NextRequest(`http://127.0.0.1:3000/api/integrations/inbound/${id}`, {
+        method: 'DELETE',
+        headers: { cookie: cookieValue() },
+      }),
+      ctx: { params: Promise.resolve({ id }) },
+    };
+  }
+
+  it('id=0 → 400 «invalid id» до БД (не 404)', async () => {
+    const { req, ctx } = rawIdReq('0');
+    const res = await DELETE_HOOK(req, ctx);
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ error: 'invalid id' });
+    expect(mocks.deleteHook).not.toHaveBeenCalled();
+  });
+
+  it('огромный цифровой id (Number → Infinity) → 400 до БД', async () => {
+    const { req, ctx } = rawIdReq('9'.repeat(400)); // 400 цифр: Number = Infinity, regex \d+ такой путь пропускает
+    const res = await DELETE_HOOK(req, ctx);
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ error: 'invalid id' });
+    expect(mocks.deleteHook).not.toHaveBeenCalled();
+  });
+
+  it('граница ветки: конечный огромный id (1e20 — целое) — не 400, а 404 из БД', async () => {
+    mocks.deleteHook.mockReturnValue(false);
+    const { req, ctx } = rawIdReq('100000000000000000000'); // Number(...) = 1e20 — integer > 0
+    const res = await DELETE_HOOK(req, ctx);
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toMatchObject({ error: 'hook not found' });
+    expect(mocks.deleteHook).toHaveBeenCalledWith(1e20); // дошло до удаления
+  });
+});
+
 describe('rate-limit POST /api/integrations/inbound/[id] (30 неудач/хук/5 мин + глобальный кап 200)', () => {
   it('30 неудачных подписей → 401, 31-я → 429 + Retry-After; 429 не инкрементит', async () => {
     mocks.getHook.mockReturnValue(HOOK_NOTIFICATION);

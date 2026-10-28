@@ -54,6 +54,14 @@ data class GamificationEventDto(
     @SerialName("createdAt") val createdAt: String,
 )
 
+/** GET /api/gamification?limit=N — статы, достижения и журнал XP-событий. */
+@Serializable
+data class GamificationResponse(
+    val stats: GamificationDto,
+    val achievements: List<AchievementDto> = emptyList(),
+    val events: List<GamificationEventDto> = emptyList(),
+)
+
 /* ---------- Projects ---------- */
 
 @Serializable
@@ -155,13 +163,50 @@ data class NotificationActionRequest(
     val id: Long? = null,
 )
 
+/* ---------- Todos ---------- */
+
+/** Задача /api/todos: поля snake_case — формат TodoRow из core todoDb. */
+@Serializable
+data class TodoDto(
+    val id: Long,
+    val text: String,
+    @SerialName("scheduled_at") val scheduledAt: String? = null,
+    val recurring: String? = null,
+    @SerialName("day_of_week") val dayOfWeek: Int? = null,
+    @SerialName("interval_hours") val intervalHours: Int? = null,
+    val status: String,
+    @SerialName("created_at") val createdAt: String,
+)
+
+@Serializable
+data class TodosResponse(
+    val todos: List<TodoDto> = emptyList(),
+)
+
+/** POST /api/todos: текст + повтор (daily/weekly/hourly) + интервал в часах для hourly. */
+@Serializable
+data class TodoAddRequest(
+    val text: String,
+    val recurring: String? = null,
+    val intervalHours: Int? = null,
+)
+
+/** POST /api/todos/{id}: complete | dismiss | delete. */
+@Serializable
+data class TodoActionRequest(
+    val action: String,
+)
+
 /* ---------- Automation ---------- */
 
 @Serializable
 data class AutomationRuleDto(
     val blogId: Long,
-    val blogSlug: String,
+    // Осиротевшее правило отдаёт slug=null — обязаны декодировать.
+    val blogSlug: String? = null,
     val blogName: String,
+    // 'default' | 'antonov' — синхронно с core stylePreset.ts.
+    val stylePreset: String = "default",
     val enabled: Boolean,
     val intervalMinutes: Int,
     val autoPublish: Boolean,
@@ -206,6 +251,12 @@ data class AutomationConfigureRequest(
     val enabled: Boolean,
     val intervalMinutes: Int,
     val autoPublish: Boolean,
+)
+
+/** PATCH /api/blogs/{slug}: смена стиля публикаций блога. */
+@Serializable
+data class BlogStyleRequest(
+    val stylePreset: String,
 )
 
 /* ---------- Calendar ---------- */
@@ -267,6 +318,127 @@ data class CreateTicketRequest(
     val subject: String,
     val body: String,
     val contact: String? = null,
+)
+
+/* ---------- Course (лекции курса I2N Challenge) ---------- */
+
+@Serializable
+data class CourseLessonDto(
+    val slug: String,
+    val title: String,
+    val kind: String,
+    @SerialName("weekNo") val weekNo: Int? = null,
+    @SerialName("durationMs") val durationMs: Long = 0,
+    val summary: String = "",
+    val why: String = "",
+    val pain: String = "",
+)
+
+@Serializable
+data class CourseLessonsResponse(
+    val ok: Boolean,
+    val lessons: List<CourseLessonDto> = emptyList(),
+)
+
+@Serializable
+data class CourseSectionDto(
+    val idx: Int,
+    @SerialName("startMs") val startMs: Long,
+    @SerialName("endMs") val endMs: Long,
+    val text: String,
+)
+
+@Serializable
+data class CourseExcerptDto(
+    val idx: Int,
+    val quote: String,
+    val explanation: String,
+)
+
+@Serializable
+data class CourseLessonResponse(
+    val ok: Boolean,
+    val lesson: CourseLessonDto,
+    val sections: List<CourseSectionDto> = emptyList(),
+    val excerpts: List<CourseExcerptDto> = emptyList(),
+)
+
+/* ---------- Chat ---------- */
+
+@Serializable
+data class ChatSessionListItemDto(
+    val id: String,
+    val strategy: String = "full",
+    val system: String? = null,
+    val memoryEnabled: Boolean = false,
+    val messageCount: Int = 0,
+    val createdAt: String? = null,
+    val updatedAt: String? = null,
+)
+
+@Serializable
+data class ChatSessionsResponse(
+    val sessions: List<ChatSessionListItemDto> = emptyList(),
+)
+
+@Serializable
+data class ChatCreateRequest(
+    val strategy: String = "full",
+    val system: String? = null,
+)
+
+@Serializable
+data class ChatSessionCreatedResponse(
+    val id: String,
+)
+
+@Serializable
+data class ChatUsageDto(
+    val prompt_tokens: Int = 0,
+    val completion_tokens: Int = 0,
+    val total_tokens: Int = 0,
+)
+
+@Serializable
+data class ChatHistoryMessageDto(
+    val role: String,
+    val content: String,
+    val ts: String? = null,
+)
+
+@Serializable
+data class ChatSessionDto(
+    val id: String,
+    val strategy: String = "full",
+    val system: String? = null,
+    val windowSize: Int = 10,
+    val usage: ChatUsageDto? = null,
+    val messages: List<ChatHistoryMessageDto> = emptyList(),
+)
+
+@Serializable
+data class ChatSessionResponse(
+    val session: ChatSessionDto,
+)
+
+@Serializable
+data class ChatSendRequest(
+    val text: String,
+    val llm: String? = null,
+)
+
+@Serializable
+data class ChatResetRequest(
+    val reset: Boolean = true,
+)
+
+@Serializable
+data class ChatSseEventDto(
+    val type: String,
+    val delta: String? = null,
+    val answer: String? = null,
+    val usage: ChatUsageDto? = null,
+    val message: String? = null,
 )
 
 /* ---------- Raw error body ---------- */

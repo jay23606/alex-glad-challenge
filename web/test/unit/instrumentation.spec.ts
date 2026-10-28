@@ -7,12 +7,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 const mocks = vi.hoisted(() => {
-  const state = { schedulerImports: 0, serviceImports: 0, dbImports: 0 };
+  const state = {
+    schedulerImports: 0,
+    serviceImports: 0,
+    dbImports: 0,
+    scheduleImports: 0,
+  };
   return {
     state,
     AutomationScheduler: vi.fn(),
     getAutomation: vi.fn(),
     withDb: vi.fn((fn: () => unknown) => fn()),
+    runDueSchedules: vi.fn(async (): Promise<void> => {}),
   };
 });
 
@@ -31,6 +37,11 @@ vi.mock('../../lib/server/automation-service', () => {
 vi.mock('../../lib/server/db', () => {
   mocks.state.dbImports += 1;
   return { withDb: mocks.withDb };
+});
+
+vi.mock('../../lib/server/blog-schedule-service', () => {
+  mocks.state.scheduleImports += 1;
+  return { runDueSchedules: mocks.runDueSchedules };
 });
 
 import { register } from '../../instrumentation';
@@ -80,6 +91,8 @@ beforeEach(() => {
   mocks.AutomationScheduler.mockReset();
   mocks.getAutomation.mockReset();
   mocks.withDb.mockClear();
+  mocks.runDueSchedules.mockReset();
+  mocks.runDueSchedules.mockResolvedValue(undefined);
   importsBaseline = { ...mocks.state };
 });
 
@@ -145,6 +158,7 @@ describe('instrumentation register', () => {
       expect(mocks.state.schedulerImports).toBeGreaterThan(0);
       expect(mocks.state.serviceImports).toBeGreaterThan(0);
       expect(mocks.state.dbImports).toBeGreaterThan(0);
+      expect(mocks.state.scheduleImports).toBeGreaterThan(0);
       expect(mocks.AutomationScheduler).toHaveBeenCalledTimes(1);
       expect(instance.start).toHaveBeenCalledTimes(1);
 
@@ -156,6 +170,7 @@ describe('instrumentation register', () => {
       await ctorOpts?.runDue();
       expect(mocks.withDb).toHaveBeenCalledTimes(1);
       expect(runDue).toHaveBeenCalledTimes(1);
+      expect(mocks.runDueSchedules).toHaveBeenCalledTimes(1);
 
       // Обработчик зарегистрирован поверх существующих.
       expect(process.listenerCount(signal)).toBe(signalSnapshot[signal].length + 1);
@@ -166,6 +181,28 @@ describe('instrumentation register', () => {
       expect(process.listenerCount(signal)).toBe(signalSnapshot[signal].length);
     },
   );
+
+  it('runDue: сбой automation не отменяет schedule, ошибки агрегируются', async () => {
+    process.env.NEXT_RUNTIME = 'nodejs';
+    process.env.AUTOMATION_ENABLED = '1';
+    installScheduler();
+    mocks.getAutomation.mockReturnValue({
+      runDue: vi.fn(() => {
+        throw new Error('rss down');
+      }),
+    });
+    mocks.runDueSchedules.mockRejectedValue(new Error('schedule down'));
+
+    await register();
+
+    const ctorOpts = mocks.AutomationScheduler.mock.calls[0]?.[0] as
+      | { runDue: () => Promise<unknown> }
+      | undefined;
+    await expect(ctorOpts?.runDue()).rejects.toThrow(
+      'automation: rss down; schedule: schedule down',
+    );
+    expect(mocks.runDueSchedules).toHaveBeenCalledTimes(1);
+  });
 
   it('ошибка конструктора scheduler → console.error, register не бросает', async () => {
     process.env.NEXT_RUNTIME = 'nodejs';

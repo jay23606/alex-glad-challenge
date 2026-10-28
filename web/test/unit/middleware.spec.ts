@@ -22,9 +22,10 @@ beforeAll(async () => {
   ({ createSessionValue } = await import('../../lib/auth'));
 });
 
-function req(path: string, init?: { method?: string; cookie?: string }): NextRequest {
+function req(path: string, init?: { method?: string; cookie?: string; bearer?: string }): NextRequest {
   const headers = new Headers({ host: 'localhost:3000' });
   if (init?.cookie) headers.set('cookie', init.cookie);
+  if (init?.bearer) headers.set('authorization', `Bearer ${init.bearer}`);
   return new NextRequest(`http://localhost:3000${path}`, {
     method: init?.method ?? 'GET',
     headers,
@@ -89,6 +90,26 @@ describe('middleware: auth-гейт (контраст к bypass)', () => {
     const res = middleware(req('/api/notifications', { cookie: `admin_session=${createSessionValue()}` }));
     expect(res.status).toBe(200);
     expect(res.headers.get('content-security-policy')).toContain('script-src');
+  });
+
+  // Мобильный session-токен — только /api: страницы он не открывает.
+  it('Bearer-сессия — /api/* пропускается: next() (200 + CSP)', () => {
+    const res = middleware(req('/api/notifications', { bearer: createSessionValue() }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-security-policy')).toContain('script-src');
+  });
+
+  it('Bearer-сессия не открывает страницы: /dashboard → 302 /login', () => {
+    const res = middleware(req('/dashboard', { bearer: createSessionValue() }));
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('http://localhost:3000/login?next=%2Fdashboard');
+  });
+
+  it('POST /api/mobile/login без auth — публичный path: next (200 + CSP, не 401)', () => {
+    const res = middleware(req('/api/mobile/login', { method: 'POST' }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-security-policy')).toContain('script-src');
+    expect(res.headers.get('location')).toBeNull();
   });
 
   it('страница /dashboard без сессии — 302 на /login?next=<pathname> (query выкидывается)', () => {

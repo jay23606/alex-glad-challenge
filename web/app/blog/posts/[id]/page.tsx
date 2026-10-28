@@ -18,7 +18,7 @@ import { Skeleton } from '../../../components/ui/Skeleton';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
 import { useToast } from '../../../components/ui/Toast';
 import { IconSend, IconTrash } from '../../../components/ui/icons';
-import { tgHtmlToPlain } from '../../../../lib/shared/tg-html';
+import { tgVisibleText } from '../../../../lib/shared/tg-html';
 
 interface PostData {
   id: number;
@@ -274,8 +274,8 @@ export default function BlogPostDetailPage() {
               Реальная отправка — сообщение уйдёт подписчикам канала.
             </p>
             <pre className="max-h-32 overflow-hidden whitespace-pre-wrap break-words rounded-md border border-line bg-bg p-2 font-mono text-xs leading-relaxed text-dim">
-              {tgHtmlToPlain(draft).split('\n').slice(0, 6).join('\n')}
-              {tgHtmlToPlain(draft).split('\n').length > 6 ? '\n…' : ''}
+              {tgVisibleText(draft).split('\n').slice(0, 6).join('\n')}
+              {tgVisibleText(draft).split('\n').length > 6 ? '\n…' : ''}
             </pre>
           </div>
         }
